@@ -1,5 +1,5 @@
+import { CodeMismatchError, receiveLink, sendLink, TransferEndedError } from "@secretli/format";
 import { ApiError } from "../api";
-import { CodeMismatchError, receiveLink, sendLink, TransferEndedError } from "../transfer";
 import {
   CodeFormatError,
   describeReceiveError,
@@ -11,8 +11,8 @@ import {
 } from "../transferSession";
 
 // The protocol runs are stubbed; these tests are about the relay around them.
-vi.mock("../transfer", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../transfer")>()),
+vi.mock("@secretli/format", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@secretli/format")>()),
   sendLink: vi.fn(),
   receiveLink: vi.fn(),
 }));

@@ -52,7 +52,7 @@ export default function EnterCode({ onReceived, onCancel }: EnterCodeProps) {
   // letters are being typed.
   useEffect(() => {
     let active = true;
-    import("../../lib/transferWords").then((m) => {
+    import("../../lib/wordCompletion").then((m) => {
       if (active) setComplete(() => m.completeWord);
     });
     return () => {
