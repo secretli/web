@@ -32,6 +32,8 @@ docker build -t secretli-server:local ../server
 SERVER_IMAGE=secretli-server:local e2e/stack/stack.sh up
 ```
 
+The footer shows the commit of each build. Locally the web app's is `dev`; set `WEB_VERSION` to a commit to see it as it appears in production.
+
 ## End-to-end tests
 
 With the stack up:

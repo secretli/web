@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import BuildVersion from "../BuildVersion";
 
-const COMMIT = "860030f3e948ed3644c2498022d613e122796147";
+const WEB_COMMIT = "5c6577a3d0b6f7e9c1a2b3c4d5e6f708192a3b4c";
+const SERVER_COMMIT = "860030f3e948ed3644c2498022d613e122796147";
 
 function serveVersion(response: Response | Error) {
   const fetchMock = vi.spyOn(globalThis, "fetch");
@@ -13,33 +14,41 @@ function serveVersion(response: Response | Error) {
 describe("BuildVersion", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
-  it("shows the short commit and links to it", async () => {
-    const fetchMock = serveVersion(new Response(JSON.stringify({ version: COMMIT })));
+  it("shows the web and server commits, each linked to its repository", async () => {
+    vi.stubEnv("VITE_BUILD_VERSION", WEB_COMMIT);
+    const fetchMock = serveVersion(new Response(JSON.stringify({ version: SERVER_COMMIT })));
 
     render(<BuildVersion />);
 
-    const link = await screen.findByRole("link", { name: "Build 860030f" });
-    expect(link.getAttribute("href")).toBe(`https://github.com/secretli/server/commit/${COMMIT}`);
+    const server = await screen.findByRole("link", { name: "server 860030f" });
+    expect(server.getAttribute("href")).toBe(
+      `https://github.com/secretli/server/commit/${SERVER_COMMIT}`,
+    );
+    const web = screen.getByRole("link", { name: "web 5c6577a" });
+    expect(web.getAttribute("href")).toBe(`https://github.com/secretli/web/commit/${WEB_COMMIT}`);
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/version", expect.anything());
   });
 
-  it("shows a local build without a link", async () => {
+  it("shows local builds without links", async () => {
     serveVersion(new Response(JSON.stringify({ version: "dev" })));
 
     render(<BuildVersion />);
 
-    await screen.findByText("Build dev");
+    await screen.findByText("server dev");
+    expect(screen.getByText("web dev")).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
   });
 
-  it("renders nothing when the version can't be read", async () => {
+  it("still shows the web build when the server can't be reached", async () => {
+    vi.stubEnv("VITE_BUILD_VERSION", WEB_COMMIT);
     const fetchMock = serveVersion(new TypeError("offline"));
 
     const { container } = render(<BuildVersion />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(container.textContent).toBe("");
+    expect(container.textContent).toBe("web 5c6577a");
   });
 });

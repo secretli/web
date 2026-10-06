@@ -23,6 +23,8 @@ services:
   web:
     build:
       context: ../..
+      args:
+        VERSION: ${WEB_VERSION:-dev}
     image: secretli-web:local
 
   server:

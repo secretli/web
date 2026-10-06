@@ -101,7 +101,7 @@ export default function Layout() {
           <LockIcon />
           End-to-end encrypted in your browser
         </span>
-        <span className="flex items-center gap-4">
+        <span className="flex flex-wrap items-center gap-x-4">
           <Link to="/how" reloadDocument={reloadDocument} className={FOOTER_LINK}>
             How it works
           </Link>
