@@ -4,7 +4,21 @@
  * the word list out of the initial bundle.
  */
 
-import { base64UrlDecode, base64UrlEncode } from "@secretli/format";
+import {
+  base64UrlDecode,
+  base64UrlEncode,
+  CodeMismatchError,
+  createOffer,
+  formatCode,
+  parseCode,
+  type ReceiverRelay,
+  randomWords,
+  receiveLink,
+  type SenderRelay,
+  sendLink,
+  TransferEndedError,
+  type TransferParty,
+} from "@secretli/format";
 import {
   ApiError,
   awaitTransferAnswer,
@@ -18,17 +32,6 @@ import {
   postTransferDelivery,
   retryDelayMs,
 } from "./api";
-import {
-  CodeMismatchError,
-  createOffer,
-  type ReceiverRelay,
-  receiveLink,
-  type SenderRelay,
-  sendLink,
-  TransferEndedError,
-  type TransferParty,
-} from "./transfer";
-import { formatCode, parseCode, randomWords } from "./transferWords";
 
 /** The typed code could not be read; nothing was sent to the server. */
 export class CodeFormatError extends Error {
