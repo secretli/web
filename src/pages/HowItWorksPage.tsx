@@ -126,9 +126,10 @@ export default function HowItWorksPage() {
           reading. The encrypted format is written down in{" "}
           <External href={FORMAT}>one document</External>, and this app and the command-line client
           implement it independently, each checked against the other's output. The images are built
-          in the open, carry an SBOM and SLSA provenance, and are signed with cosign. This page
-          allows no scripts, styles or fonts from anywhere but this site, and sends no referrer when
-          you follow a link out.
+          in the open, carry an SBOM and SLSA provenance, and are signed with cosign. The footer
+          names the exact builds you are using, this app's and the server's, each linked to its
+          commit. This page allows no scripts, styles or fonts from anywhere but this site, and
+          sends no referrer when you follow a link out.
         </p>
       </Section>
     </div>
