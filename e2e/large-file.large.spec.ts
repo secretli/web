@@ -60,7 +60,8 @@ test.describe("Large-file performance", () => {
 
     await page.goto("/share");
     await page.setInputFiles('input[type="file"]', sourcePath);
-    await expect(page.getByText(new RegExp(`${sizeMiB.toFixed(1)} MB`))).toBeVisible({
+    // The file list shows the size on its own; the summary line repeats it.
+    await expect(page.getByText(`${sizeMiB.toFixed(1)} MB`, { exact: true })).toBeVisible({
       timeout: 10000,
     });
 
