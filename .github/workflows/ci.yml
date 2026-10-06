@@ -90,7 +90,8 @@ jobs:
           curl -fsSLO "${base}/${archive}"
           curl -fsSLO "${base}/checksums.txt"
           grep " ${archive}\$" checksums.txt | sha256sum -c -
-          tar -xzf "$archive" secretli
+          mkdir -p cli
+          tar -xzf "$archive" -C cli
 
       - name: Start the stack
         env:
@@ -102,7 +103,7 @@ jobs:
 
       - name: Playwright
         env:
-          SECRETLI_CLI: ${{ runner.temp }}/secretli
+          SECRETLI_CLI: ${{ runner.temp }}/cli/secretli
         run: pnpm e2e
 
       - name: Logs
