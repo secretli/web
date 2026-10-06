@@ -1,0 +1,83 @@
+name: Large E2E
+
+on:
+  schedule:
+    # Weekly, so the near-limit upload path is exercised even when nobody
+    # triggers it by hand.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      size_mib:
+        description: "Synthetic file size in MiB"
+        required: false
+        default: "1023"
+      max_total_ms:
+        description: "Optional total runtime threshold in milliseconds"
+        required: false
+        default: ""
+      max_heap_mib:
+        description: "Optional browser heap threshold in MiB"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  large-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: secretli/server
+          path: .server
+
+      - name: Build the server
+        run: docker build -t secretli-server:e2e .server
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install chromium
+
+      - name: Start the stack
+        env:
+          SERVER_IMAGE: secretli-server:e2e
+        run: e2e/stack/stack.sh up
+
+      - name: Large-file Playwright E2E
+        env:
+          LARGE_E2E_SIZE_MB: ${{ inputs.size_mib || '1023' }}
+          LARGE_E2E_MAX_TOTAL_MS: ${{ inputs.max_total_ms }}
+          LARGE_E2E_MAX_HEAP_MIB: ${{ inputs.max_heap_mib }}
+        run: pnpm e2e:large
+
+      - name: Logs
+        if: always()
+        run: e2e/stack/stack.sh logs || true
+
+      - name: Stop the stack
+        if: always()
+        run: e2e/stack/stack.sh down || true

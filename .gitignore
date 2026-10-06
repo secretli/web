@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+
+# A checkout of secretli/server, made by the end-to-end stack
+.server/
+
+.env
+.env.local
+
+.idea/
+.vscode/
+*.swp
+.claude/
+.DS_Store
