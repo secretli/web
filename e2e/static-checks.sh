@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Checks what the browser tests can't see directly: the web image's headers,
-# routing and content types, as served through the gateway.
+# routing within the app and content types, as served through the stack's
+# gateway. The gateway's own routing is checked in secretli/e2e.
 set -euo pipefail
 
 BASE="${1:-http://localhost:8080}"
@@ -40,8 +41,5 @@ pass "hashed assets are cached for good, missing ones are 404s"
 
 [ "$(header /sw.js cache-control)" = no-cache ] || fail "the service worker must be revalidated"
 pass "the service worker is revalidated"
-
-curl -fsS "$BASE/api/v1/version" | grep -q '"version"' || fail "the API answers through the gateway"
-pass "the gateway routes /api/ to the server"
 
 echo "all static checks passed against $BASE"

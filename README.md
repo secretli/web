@@ -28,18 +28,18 @@ pnpm build       # production build into dist/
 
 ## The whole stack
 
-`e2e/stack` runs Secretli as production does: this app's image and the server's image behind a gateway that splits `/api/` from the rest, with PostgreSQL and SeaweedFS, on `http://localhost:8080`.
+The stack from [secretli/e2e](https://github.com/secretli/e2e) runs Secretli as production does: this app's image and the server's image behind a gateway that splits `/api/` from the rest, with PostgreSQL and SeaweedFS, on `http://localhost:8080`. With a checkout of secretli/e2e next to this one (or `E2E_DIR` pointing at it):
 
 ```bash
-e2e/stack/stack.sh up      # builds this image, starts everything, waits until it answers
-e2e/stack/stack.sh down
+e2e/stack.sh up      # builds this image, starts everything, waits until it answers
+e2e/stack.sh down
 ```
 
 The server image defaults to the latest published one. To use another, such as one built from a server checkout, set `SERVER_IMAGE`:
 
 ```bash
 docker build -t secretli-server:local ../server
-SERVER_IMAGE=secretli-server:local e2e/stack/stack.sh up
+SERVER_IMAGE=secretli-server:local e2e/stack.sh up
 ```
 
 The footer shows the commit of each build. Locally the web app's is `dev`; set `WEB_VERSION` to a commit to see it as it appears in production.
@@ -49,12 +49,14 @@ The footer shows the commit of each build. Locally the web app's is `dev`; set `
 With the stack up:
 
 ```bash
-e2e/stack/static-checks.sh    # headers, routing and content types of the image, through the gateway
+e2e/static-checks.sh          # headers, routing and content types of the image, through the gateway
 pnpm e2e                      # Playwright, with axe accessibility checks on every screen
 pnpm e2e:large                # opt-in: a near-limit upload and download, with timing and heap samples
 ```
 
-The browser tests run in parallel. Every test comes from the same address, so the stack's server runs with its rate limits raised (`RATE_LIMIT_MULTIPLIER`, 100 by default; production leaves it unset). Set `SECRETLI_CLI` to a `secretli` binary and they also check that links made by the command-line client open in the browser and the other way round, pasted and sent with a code. CI does all of this against the latest published server image; a weekly workflow runs the large-file test.
+The browser tests run in parallel. Every test comes from the same address, so the stack's server runs with its rate limits raised (`RATE_LIMIT_MULTIPLIER`, 100 by default; production leaves it unset). CI does all of this against the latest published server image; a weekly workflow runs the large-file test.
+
+CI also runs the whole of Secretli with each change, from [secretli/e2e](https://github.com/secretli/e2e): the server and both clients against this app behind a gateway like production's, including links and codes between the command-line client and the browser. Nothing is published unless it passes.
 
 ## The image
 
