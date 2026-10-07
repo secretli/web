@@ -54,7 +54,7 @@ pnpm e2e                      # Playwright, with axe accessibility checks on eve
 pnpm e2e:large                # opt-in: a near-limit upload and download, with timing and heap samples
 ```
 
-The browser tests run one at a time, because the server allows ten new secrets a minute per address and every test comes from the same one. Set `SECRETLI_CLI` to a `secretli` binary and they also check that links made by the command-line client open in the browser and the other way round, pasted and sent with a code. CI does all of this against a server built from secretli/server's main branch; a weekly workflow runs the large-file test.
+The browser tests run in parallel. Every test comes from the same address, so the stack's server runs with its rate limits raised (`RATE_LIMIT_MULTIPLIER`, 100 by default; production leaves it unset). Set `SECRETLI_CLI` to a `secretli` binary and they also check that links made by the command-line client open in the browser and the other way round, pasted and sent with a code. CI does all of this against the latest published server image; a weekly workflow runs the large-file test.
 
 ## The image
 

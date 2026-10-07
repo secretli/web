@@ -7,6 +7,8 @@
 #   e2e/stack/stack.sh down
 #
 # SERVER_IMAGE picks the server; it defaults to the latest published one.
+# Its rate limits are raised (RATE_LIMIT_MULTIPLIER), so the browser tests
+# can run in parallel.
 name: secretli-web-e2e
 
 services:
@@ -43,6 +45,9 @@ services:
       S3_USE_SSL: "false"
       S3_REGION: us-east-1
       SERVER_PORT: "8080"
+      # The tests make many secrets from one address within seconds, more
+      # than the real limits allow; production leaves this unset.
+      RATE_LIMIT_MULTIPLIER: ${RATE_LIMIT_MULTIPLIER:-100}
 
   postgres:
     image: postgres:18-alpine
