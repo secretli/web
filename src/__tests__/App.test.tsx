@@ -16,12 +16,13 @@ const secretBox = () => screen.getByLabelText("Secret") as HTMLTextAreaElement;
 const logo = () => screen.getByRole("link", { name: "secretli" });
 
 /** Types a secret and changes every setting away from its default. */
-function fillInTheComposer() {
+function fillInTheComposer({ password = true } = {}) {
   fireEvent.change(secretBox(), { target: { value: "hunter2" } });
   fireEvent.click(screen.getByRole("button", { name: "Expires in 1 day" }));
   fireEvent.click(screen.getByRole("button", { name: "4 hours" }));
   fireEvent.click(screen.getByRole("button", { name: "Opens once" }));
   fireEvent.click(screen.getByRole("button", { name: /Until it expires/ }));
+  if (!password) return;
   fireEvent.click(screen.getByRole("button", { name: "Password" }));
   fireEvent.change(screen.getByLabelText("Password"), { target: { value: "s3cret" } });
 }
@@ -71,9 +72,13 @@ describe("starting over", () => {
     render(<App />);
 
     for (const leave of [logo, () => screen.getByRole("link", { name: "Share" })]) {
-      fillInTheComposer();
+      // Without a password: deriving its key takes long enough under coverage
+      // to outlast the wait for the link, and the tests above cover it.
+      fillInTheComposer({ password: false });
       fireEvent.click(screen.getByRole("button", { name: /Create link/ }));
-      expect(await screen.findByRole("heading", { name: /link is ready/i })).toBeTruthy();
+      expect(
+        await screen.findByRole("heading", { name: /link is ready/i }, { timeout: 5000 }),
+      ).toBeTruthy();
 
       fireEvent.click(leave());
 
