@@ -5,10 +5,9 @@ export default defineConfig({
   testIgnore: process.env.LARGE_E2E === "1" ? [] : ["**/*.large.spec.ts"],
   timeout: 30000,
   retries: 0,
-  // One test at a time: the server allows 10 new secrets a minute per client
-  // address, all of these tests come from one address, and run in parallel
-  // they create more than that within seconds.
-  workers: 1,
+  // In parallel: the stack's server runs with raised rate limits
+  // (RATE_LIMIT_MULTIPLIER), and every test makes its own secrets.
+  fullyParallel: true,
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:8080",
     headless: true,
