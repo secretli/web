@@ -1,8 +1,18 @@
 # Secretli web
 
-The web app of [Secretli](https://secretli.app): share text and files through links that open once and expire, encrypted in the browser before anything leaves it.
+The web app of [Secretli](https://secretli.app): share text and files through links that open once and expire, encrypted in the browser before anything leaves it. A link can also reach another device as a short code like `7-acid-rocket`, read out or typed instead of copied.
 
 It is a React single-page app, built with Vite and served as static files by nginx. The API is a separate service, [secretli/server](https://github.com/secretli/server); in production a gateway sends `/api/` there and everything else here, so both share one origin. The encryption comes from [secretli/format](https://github.com/secretli/format), the same format the [command-line client](https://github.com/secretli/cli) speaks, so links work in either.
+
+## Sending a link with a code
+
+Once a link is ready, **Send with a code** shows a code like `7-acid-rocket`. On the other device, open `secretli.app/c` and type it, or run `secretli receive 7-acid-rocket` with the [command-line client](https://github.com/secretli/cli), whose `secretli send` works the other way round. The receiving device then opens the secret as if the link had been pasted.
+
+- **What stays private.** The number only tells the server's relay which transfer is meant. The two words are the password of a key exchange (CPace) between the two devices and never leave them. The sender hands the link over only after the receiver has proved it typed the same words, and the relay carries public key-exchange values and a sealed, fixed-size copy of the link, never the link itself.
+- **Limits.** A code works once and for ten minutes. A wrong code ends the transfer on both sides, so someone guessing gets one try in about 1.7 million. Only the link to hand out is sent; the owner link stays on the device that made the secret.
+- **Typing.** Case, spaces or dots instead of dashes, and the first three letters of a word are all accepted. Codes are checked on the device before anything is sent, so a typo doesn't use up the transfer.
+
+The protocol, the word list (the [EFF short word list](https://www.eff.org/dice), CC BY 3.0 US) and their tests come from `@secretli/format`, specified in [FORMAT.md section 11](https://github.com/secretli/format/blob/main/FORMAT.md#11-handing-a-link-over-with-a-code). Here, `src/lib/transferSession.ts` talks to the relay, and the key exchange and the word list load only when someone sends or receives with a code, so they stay out of the main bundle.
 
 ## Development
 
@@ -44,7 +54,7 @@ pnpm e2e                      # Playwright, with axe accessibility checks on eve
 pnpm e2e:large                # opt-in: a near-limit upload and download, with timing and heap samples
 ```
 
-The browser tests run one at a time, because the server allows ten new secrets a minute per address and every test comes from the same one. Set `SECRETLI_CLI` to a `secretli` binary and they also check that links made by the command-line client open in the browser and the other way round. CI does all of this against a server built from secretli/server's main branch; a weekly workflow runs the large-file test.
+The browser tests run one at a time, because the server allows ten new secrets a minute per address and every test comes from the same one. Set `SECRETLI_CLI` to a `secretli` binary and they also check that links made by the command-line client open in the browser and the other way round, pasted and sent with a code. CI does all of this against a server built from secretli/server's main branch; a weekly workflow runs the large-file test.
 
 ## The image
 
