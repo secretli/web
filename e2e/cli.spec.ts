@@ -111,8 +111,15 @@ test.describe("Command-line client", () => {
     await expect(shown).toBeVisible({ timeout: 10000 });
     const code = (await shown.textContent()) ?? "";
 
-    // Typed loosely, in parts. Piped: stdout is the text alone, exactly as shared.
-    const received = await run(CLI, ["receive", ...code.split("-"), "--server", baseURL ?? ""]);
+    // Typed loosely, in parts. --yes, since a one-time secret is otherwise
+    // asked about first. Piped: stdout is the text alone, exactly as shared.
+    const received = await run(CLI, [
+      "receive",
+      ...code.split("-"),
+      "--yes",
+      "--server",
+      baseURL ?? "",
+    ]);
     expect(received.stdout).toBe(text);
     expect(received.stderr).toContain("A one-time text secret");
     await expect(page.getByText("Sent. The other device is opening the secret.")).toBeVisible();
