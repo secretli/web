@@ -14,10 +14,6 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  # The command-line client the end-to-end tests check the app against.
-  SECRETLI_CLI_VERSION: v0.4.0
-
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -72,40 +68,47 @@ jobs:
       - name: Install Playwright browser
         run: pnpm exec playwright install chromium
 
-      - name: Install the command-line client
-        run: |
-          base="https://github.com/secretli/cli/releases/download/${SECRETLI_CLI_VERSION}"
-          archive="secretli_${SECRETLI_CLI_VERSION}_linux_amd64.tar.gz"
-          cd "$RUNNER_TEMP"
-          curl -fsSLO "${base}/${archive}"
-          curl -fsSLO "${base}/checksums.txt"
-          grep " ${archive}\$" checksums.txt | sha256sum -c -
-          mkdir -p cli
-          tar -xzf "$archive" -C cli
+      # The stack comes from secretli/e2e: this app's image, built here, and
+      # the latest published server image with raised rate limits.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: secretli/e2e
+          path: .e2e
+          persist-credentials: false
 
-      # The stack runs the latest published server image, with raised rate
-      # limits.
       - name: Start the stack
-        run: e2e/stack/stack.sh up
+        env:
+          E2E_DIR: .e2e
+          WEB_VERSION: ${{ github.sha }}
+        run: e2e/stack.sh up
 
       - name: Static checks
-        run: e2e/stack/static-checks.sh
+        run: e2e/static-checks.sh
 
       - name: Playwright
-        env:
-          SECRETLI_CLI: ${{ runner.temp }}/cli/secretli
         run: pnpm e2e
 
       - name: Logs
         if: always()
-        run: e2e/stack/stack.sh logs || true
+        env:
+          E2E_DIR: .e2e
+        run: e2e/stack.sh logs || true
 
       - name: Stop the stack
         if: always()
-        run: e2e/stack/stack.sh down || true
+        env:
+          E2E_DIR: .e2e
+        run: e2e/stack.sh down || true
+
+  # The whole of Secretli with this change: the server and both clients
+  # against this app, behind a gateway like production's. See secretli/e2e.
+  whole-setup:
+    uses: secretli/e2e/.github/workflows/whole-setup.yml@main
+    with:
+      web_ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
   build-and-publish:
-    needs: [check, e2e]
+    needs: [check, e2e, whole-setup]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30

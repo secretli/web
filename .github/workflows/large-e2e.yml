@@ -54,10 +54,19 @@ jobs:
       - name: Install Playwright browser
         run: pnpm exec playwright install chromium
 
-      # The stack runs the latest published server image, with raised rate
-      # limits.
+      # The stack comes from secretli/e2e: this app's image, built here, and
+      # the latest published server image.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: secretli/e2e
+          path: .e2e
+          persist-credentials: false
+
       - name: Start the stack
-        run: e2e/stack/stack.sh up
+        env:
+          E2E_DIR: .e2e
+          WEB_VERSION: ${{ github.sha }}
+        run: e2e/stack.sh up
 
       - name: Large-file Playwright E2E
         env:
@@ -68,8 +77,12 @@ jobs:
 
       - name: Logs
         if: always()
-        run: e2e/stack/stack.sh logs || true
+        env:
+          E2E_DIR: .e2e
+        run: e2e/stack.sh logs || true
 
       - name: Stop the stack
         if: always()
-        run: e2e/stack/stack.sh down || true
+        env:
+          E2E_DIR: .e2e
+        run: e2e/stack.sh down || true
