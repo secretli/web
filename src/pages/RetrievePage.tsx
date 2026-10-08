@@ -39,12 +39,19 @@ import {
 import { saveFilesSequentially } from "../lib/download";
 import { formatSize } from "../lib/format";
 
-/** The server has no secret for this link; it cannot tell why. */
-const GONE = {
-  title: "This secret is gone",
-  message:
-    "It was opened already, or it expired. Nothing is left on the server, so ask the sender for a new link if you still need it.",
-};
+/**
+ * The server has no secret for this link and cannot tell why: one that
+ * expired answers like one that never existed. The owner is the sender, so
+ * there is nobody to ask for a new link.
+ */
+function notFound(owner: boolean): { title: string; message: string } {
+  const why = "It may have expired, been opened or been deleted. Nothing is left on the server";
+  return {
+    title: "This secret is gone",
+    message: owner ? `${why}.` : `${why}, so ask the sender for a new link if you still need it.`,
+  };
+}
+
 /** The fragment is not a share link, typically because it was cut off when copied. */
 const DAMAGED = {
   title: "This link is damaged",
@@ -163,7 +170,7 @@ export default function RetrievePage() {
         setState({ stage: "gone", gone, owner: Boolean(deletionToken) });
       } else if (err instanceof ApiError) {
         if (err.status === 404) {
-          setState({ stage: "error", ...GONE });
+          setState({ stage: "error", ...notFound(Boolean(deletionToken)) });
         } else if (err.status === 403) {
           setState({ stage: "error", ...DAMAGED });
         } else {
@@ -352,16 +359,13 @@ export default function RetrievePage() {
   /** Asks what became of a secret that the server just refused to open. */
   async function explainGone(identity: ShareIdentity) {
     const encoded = identity.baseKeySet.getEncoded();
+    const owner = Boolean(identity.deletionToken);
     try {
       await getSecretMetadata(encoded.publicID, encoded.metadataToken);
-      setState({ stage: "error", ...GONE });
+      setState({ stage: "error", ...notFound(owner) });
     } catch (err) {
       const gone = secretGoneFromError(err);
-      setState(
-        gone
-          ? { stage: "gone", gone, owner: Boolean(identity.deletionToken) }
-          : { stage: "error", ...GONE },
-      );
+      setState(gone ? { stage: "gone", gone, owner } : { stage: "error", ...notFound(owner) });
     }
   }
 

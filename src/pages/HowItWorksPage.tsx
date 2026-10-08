@@ -66,9 +66,15 @@ export default function HowItWorksPage() {
           the link opens once, and hashes of the tokens.
         </p>
         <p>
-          Once a secret is gone, a note of what became of it stays for a week: opened, expired or
-          deleted, and when. It holds no content, and only a link to the secret can read it. That is
-          how the owner link, and the link itself, can tell you what happened.
+          When a one-time secret is opened, or a secret is deleted, the server keeps a note of which
+          of the two it was, but not when. A reusable secret gets a note of whether someone has
+          opened it, not when. The notes hold no content, and only a link to the secret can read
+          them. That is how the owner link, and the link itself, can tell you what happened.
+        </p>
+        <p>
+          Notes last only until the secret would have expired anyway. Once its expiry passes,
+          nothing about the secret is left, so an expired link gets the same answer as one that
+          never existed.
         </p>
         <p>
           That is all. The server cannot read the content, cannot see the file names, and cannot
@@ -101,8 +107,8 @@ export default function HowItWorksPage() {
         <p>
           Your owner link is the recipient's link with a deletion token after <Code>!</Code>. It
           opens the secret too, so keep it to yourself. What it adds is the right to delete the
-          secret for everyone, and word of what became of it: opened, and when; expired unopened; or
-          deleted by you.
+          secret for everyone and, until it expires, word of what became of it: opened, or deleted
+          by you.
         </p>
       </Section>
 

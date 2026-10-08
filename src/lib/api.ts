@@ -218,7 +218,12 @@ export interface SecretMetadataResponse {
   burn_after_read: boolean;
   expires_at: string;
   created_at: string;
-  /** When a recipient first opened a reusable secret, if one has. */
+  /** Whether someone other than the owner has opened a reusable secret. */
+  opened?: boolean;
+  /**
+   * What servers before `opened` sent: when a recipient first opened a
+   * reusable secret. Transition only; see secretOpened.
+   */
   opened_at?: string;
 }
 
@@ -232,21 +237,26 @@ export function getSecretMetadata(
   });
 }
 
+/**
+ * Whether a reusable secret has been opened. A server that still sends
+ * `opened_at` means the same by having it; its time is never shown.
+ */
+export function secretOpened(meta: Pick<SecretMetadataResponse, "opened" | "opened_at">): boolean {
+  return meta.opened ?? Boolean(meta.opened_at);
+}
+
+// "expired" comes only from servers before an expired secret became a plain 404.
 export type SecretOutcome = "opened" | "expired" | "deleted";
 
 /**
  * What became of a secret that is gone: the details of the 410 the metadata
- * endpoint answers with for as long as the server remembers.
+ * endpoint answers with until the secret would have expired. They tell no
+ * time; servers before that also sent when it ended, when it was first opened
+ * and whether the owner opened it, which is ignored.
  */
 export interface SecretGone {
   readonly outcome: SecretOutcome;
   readonly burn_after_read: boolean;
-  /** When it happened; for an expired secret, its expiry. */
-  readonly ended_at: string;
-  /** When a recipient first opened it, if anyone did. */
-  readonly first_opened_at?: string;
-  /** A one-time secret the owner opened themselves, so nobody else got it. */
-  readonly opened_by_owner: boolean;
 }
 
 const OUTCOMES: readonly string[] = ["opened", "expired", "deleted"];
@@ -254,17 +264,9 @@ const OUTCOMES: readonly string[] = ["opened", "expired", "deleted"];
 /** The story behind a 410 from the metadata endpoint, or null for any other error. */
 export function secretGoneFromError(err: unknown): SecretGone | null {
   if (!(err instanceof ApiError) || err.status !== 410 || !err.details) return null;
-  const { outcome, ended_at, first_opened_at, burn_after_read, opened_by_owner } = err.details;
-  if (typeof outcome !== "string" || !OUTCOMES.includes(outcome) || typeof ended_at !== "string") {
-    return null;
-  }
-  return {
-    outcome: outcome as SecretOutcome,
-    burn_after_read: Boolean(burn_after_read),
-    ended_at,
-    first_opened_at: typeof first_opened_at === "string" ? first_opened_at : undefined,
-    opened_by_owner: Boolean(opened_by_owner),
-  };
+  const { outcome, burn_after_read } = err.details;
+  if (typeof outcome !== "string" || !OUTCOMES.includes(outcome)) return null;
+  return { outcome: outcome as SecretOutcome, burn_after_read: Boolean(burn_after_read) };
 }
 
 // --- Delete ---
