@@ -60,8 +60,8 @@ const DAMAGED = {
 };
 
 /** An error page for everything the other titles don't cover. */
-function failed(message: string): State {
-  return { stage: "error", title: "Something went wrong", message };
+function failed(message: string, owner: boolean): State {
+  return { stage: "error", title: "Something went wrong", message, owner };
 }
 
 /**
@@ -97,7 +97,7 @@ type State =
     }
   | { stage: "deleted" }
   | { stage: "gone"; gone: SecretGone; owner: boolean }
-  | { stage: "error"; title: string; message: string; owner?: boolean };
+  | { stage: "error"; title: string; message: string; owner: boolean };
 
 /** The server did not accept the blob token: the link or password is wrong. */
 class BlobTokenRejectedError extends Error {}
@@ -145,14 +145,17 @@ export default function RetrievePage() {
       return;
     }
     stripFragmentFromLocation();
-    if (!isShareFragment(hash)) {
-      setState({ stage: "error", ...DAMAGED });
-      return;
-    }
 
+    // Split before checking: an owner link cut off inside its deletion token is
+    // still an owner link.
     const delimiterIndex = hash.indexOf("!");
     const shareSecret = delimiterIndex >= 0 ? hash.slice(0, delimiterIndex) : hash;
     const deletionToken = delimiterIndex >= 0 ? hash.slice(delimiterIndex + 1) : "";
+    const owner = Boolean(deletionToken);
+    if (!isShareFragment(hash)) {
+      setState({ stage: "error", ...DAMAGED, owner });
+      return;
+    }
 
     try {
       const baseKeySet = await KeySet.fromShareSecret(shareSecret);
@@ -168,17 +171,17 @@ export default function RetrievePage() {
     } catch (err) {
       const gone = secretGoneFromError(err);
       if (gone) {
-        setState({ stage: "gone", gone, owner: Boolean(deletionToken) });
+        setState({ stage: "gone", gone, owner });
       } else if (err instanceof ApiError) {
         if (err.status === 404) {
-          setState({ stage: "error", ...notFound(Boolean(deletionToken)) });
+          setState({ stage: "error", ...notFound(owner) });
         } else if (err.status === 403) {
-          setState({ stage: "error", ...DAMAGED });
+          setState({ stage: "error", ...DAMAGED, owner });
         } else {
-          setState(failed(err.message));
+          setState(failed(err.message, owner));
         }
       } else {
-        setState(failed("An unexpected error occurred."));
+        setState(failed("An unexpected error occurred.", owner));
       }
     }
   }, []);
@@ -230,6 +233,7 @@ export default function RetrievePage() {
         stage: "error",
         title: "This link can't be opened here",
         message: "It uses a format this version of Secretli doesn't understand.",
+        owner: Boolean(identity.deletionToken),
       });
       return;
     }
@@ -317,11 +321,13 @@ export default function RetrievePage() {
    * the session already started; only definite answers end on an error page.
    */
   function handleRevealError(err: unknown, identity: ShareIdentity) {
+    const owner = Boolean(identity.deletionToken);
     if (err instanceof BlobTokenRejectedError) {
       setState({
         stage: "error",
         title: "This link can't open the secret",
         message: "It doesn't fit the secret it points to. Ask the sender to send it again.",
+        owner,
       });
       return;
     }
@@ -333,6 +339,7 @@ export default function RetrievePage() {
           title: "The download window closed",
           message:
             "This one-time secret was opened, and the time to download it has passed. It can't be opened again.",
+          owner,
         });
       } else {
         toast.error("The download window has expired. Please try again.");
@@ -340,7 +347,7 @@ export default function RetrievePage() {
       return;
     }
     if (!(err instanceof ApiError)) {
-      setState(failed("An unexpected error occurred."));
+      setState(failed("An unexpected error occurred.", owner));
       return;
     }
     if (err.status === 404) {
@@ -353,7 +360,7 @@ export default function RetrievePage() {
     } else if (isTransientStatus(err.status)) {
       toast.error("The server could not complete the request. Please try again.");
     } else {
-      setState(failed(err.message));
+      setState(failed(err.message, owner));
     }
   }
 

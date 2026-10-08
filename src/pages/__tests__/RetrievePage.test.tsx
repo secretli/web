@@ -1,5 +1,5 @@
-import { createEncryptedBundle, KeySet } from "@secretli/format";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createEncryptedBundle, KeySet, type SecretMeta } from "@secretli/format";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { ApiError, type RetrievalSessionResponse } from "../../lib/api";
 import RetrievePage from "../RetrievePage";
@@ -34,6 +34,8 @@ async function publishTextShare(
     ownerLink?: boolean;
     /** Whether the metadata says someone other than the owner has opened the secret. */
     opened?: boolean;
+    /** What the metadata says the secret is, for a kind this version doesn't know. */
+    type?: string;
   } = {},
 ) {
   const baseKeySet = await KeySet.generateRandom();
@@ -49,7 +51,7 @@ async function publishTextShare(
 
   api.getSecretMetadata.mockResolvedValue({
     encrypted_meta: await baseKeySet.encryptMeta({
-      type: "text",
+      type: (options.type ?? "text") as SecretMeta["type"],
       password_protected: options.password !== undefined,
     }),
     blob_size: bytes.length,
@@ -236,22 +238,138 @@ describe("RetrievePage", () => {
     expect(screen.queryByText(/ask the sender/)).toBeNull();
   });
 
-  it.each([
-    [true, "Share another secret", "/"],
-    [false, "Share a secret of your own", "/share"],
-  ])(
-    "leads on from a link the server has nothing for (owner link: %s)",
-    async (ownerLink, label, href) => {
-      await publishTextShare({ ownerLink });
-      api.getSecretMetadata.mockImplementation(async () => {
-        throw new ApiError(404, "secret not found");
-      });
-      render(<RetrievePage />);
+  async function reveal() {
+    const button = await screen.findByRole("button", { name: "Reveal secret" });
+    // Awaited in act: the page may finish within a few ticks of the click.
+    await act(async () => {
+      fireEvent.click(button);
+    });
+  }
 
-      const back = await screen.findByRole("link", { name: `← ${label}` });
+  /** Opens a link that ends on an error page, as an owner's link or a recipient's. */
+  type Visit = (ownerLink: boolean) => Promise<void>;
+
+  const errorPages: [page: string, heading: string, visit: Visit][] = [
+    [
+      "a link the server has nothing for",
+      "This secret is gone",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink });
+        api.getSecretMetadata.mockRejectedValue(new ApiError(404, "secret not found"));
+        render(<RetrievePage />);
+      },
+    ],
+    [
+      "a link cut off while copying",
+      "This link is damaged",
+      async (ownerLink) => {
+        // One character short, in the deletion token of an owner link.
+        window.location.hash = ownerLink
+          ? `#${"A".repeat(43)}!${"D".repeat(42)}`
+          : `#${"A".repeat(42)}`;
+        render(<RetrievePage />);
+      },
+    ],
+    [
+      "a link the server refuses",
+      "This link is damaged",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink });
+        api.getSecretMetadata.mockRejectedValue(new ApiError(403, "invalid metadata token"));
+        render(<RetrievePage />);
+      },
+    ],
+    [
+      "a server that fails on opening the link",
+      "Something went wrong",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink });
+        api.getSecretMetadata.mockRejectedValue(new ApiError(500, "internal error"));
+        render(<RetrievePage />);
+      },
+    ],
+    [
+      "an unexpected failure on opening the link",
+      "Something went wrong",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink });
+        api.getSecretMetadata.mockRejectedValue(new Error("not an answer from the server"));
+        render(<RetrievePage />);
+      },
+    ],
+    [
+      "a kind of secret this version doesn't know",
+      "This link can't be opened here",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink, type: "note" });
+        render(<RetrievePage />);
+        await reveal();
+      },
+    ],
+    [
+      "a link the secret doesn't accept",
+      "This link can't open the secret",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink });
+        api.startRetrievalSession.mockRejectedValue(new ApiError(403, "invalid blob token"));
+        render(<RetrievePage />);
+        await reveal();
+      },
+    ],
+    [
+      "a secret that went away before it was opened",
+      "This secret is gone",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink });
+        api.startRetrievalSession.mockRejectedValue(new ApiError(404, "secret not found"));
+        render(<RetrievePage />);
+        await reveal();
+      },
+    ],
+    [
+      "a one-time session that ran out",
+      "The download window closed",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink, burnAfterRead: true });
+        failNextRangeRead(new ApiError(403, "invalid retrieval session"));
+        render(<RetrievePage />);
+        await reveal();
+      },
+    ],
+    [
+      "a server that fails on opening the secret",
+      "Something went wrong",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink });
+        failNextRangeRead(new ApiError(400, "bad request"));
+        render(<RetrievePage />);
+        await reveal();
+      },
+    ],
+    [
+      "an unexpected failure on opening the secret",
+      "Something went wrong",
+      async (ownerLink) => {
+        await publishTextShare({ ownerLink });
+        failNextRangeRead(new Error("not an answer from the server"));
+        render(<RetrievePage />);
+        await reveal();
+      },
+    ],
+  ];
+
+  describe.each(errorPages)("%s", (_page, heading, visit) => {
+    it.each([
+      [true, "Share another secret", "/"],
+      [false, "Share a secret of your own", "/share"],
+    ])("leads on as the gone page does (owner link: %s)", async (ownerLink, label, href) => {
+      await visit(ownerLink);
+
+      expect(await screen.findByRole("heading", { name: heading })).toBeTruthy();
+      const back = screen.getByRole("link", { name: `← ${label}` });
       expect(back.getAttribute("href")).toBe(href);
-    },
-  );
+    });
+  });
 
   it("ends on an error page when a burn-after-read session expires", async () => {
     await publishTextShare({ burnAfterRead: true });
