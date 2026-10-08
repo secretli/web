@@ -28,7 +28,7 @@ pnpm build       # production build into dist/
 
 ## The whole stack
 
-The stack from [secretli/e2e](https://github.com/secretli/e2e) runs Secretli as production does: this app's image and the server's image behind a gateway that splits `/api/` from the rest, with PostgreSQL and SeaweedFS, on `http://localhost:8080`. With a checkout of secretli/e2e next to this one (or `E2E_DIR` pointing at it):
+The stack from [secretli/e2e](https://github.com/secretli/e2e) runs Secretli as production does: this app's image and the server's image behind a gateway that splits `/api/` from the rest, with PostgreSQL, and SeaweedFS standing in for production's object storage (Hetzner), on `http://localhost:8080`. With a checkout of secretli/e2e next to this one (or `E2E_DIR` pointing at it):
 
 ```bash
 e2e/stack.sh up      # builds this image, starts everything, waits until it answers
