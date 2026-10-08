@@ -14,12 +14,12 @@ export function RetrieveLoading() {
 export function RetrieveError({
   title,
   message,
-  owner = false,
+  owner,
 }: {
   title: string;
   message: string;
-  /** Whether the link that was opened is the owner link, for the errors that know. */
-  owner?: boolean;
+  /** Whether the link that was opened is the owner link. */
+  owner: boolean;
 }) {
   return (
     <div className="space-y-8">
