@@ -25,14 +25,6 @@ export function goneCopy(gone: SecretGone, owner: boolean): { title: string; lea
             title: "This secret was already opened",
             lead: "Someone opened it, and a one-time secret opens only once. If that wasn't you, tell the sender: the link may have reached someone else.",
           };
-    case "expired":
-      // Only older servers say so; now an expired secret is a plain 404.
-      return owner
-        ? { title: "Your secret expired", lead: "Nothing is left on the server." }
-        : {
-            title: "This secret expired",
-            lead: "Nothing is left on the server, so ask the sender for a new link if you still need it.",
-          };
     case "deleted":
       return owner
         ? {

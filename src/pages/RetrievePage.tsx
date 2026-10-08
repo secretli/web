@@ -44,11 +44,12 @@ import { formatSize } from "../lib/format";
  * expired answers like one that never existed. The owner is the sender, so
  * there is nobody to ask for a new link.
  */
-function notFound(owner: boolean): { title: string; message: string } {
+function notFound(owner: boolean): { title: string; message: string; owner: boolean } {
   const why = "It may have expired, been opened or been deleted. Nothing is left on the server";
   return {
     title: "This secret is gone",
     message: owner ? `${why}.` : `${why}, so ask the sender for a new link if you still need it.`,
+    owner,
   };
 }
 
@@ -96,7 +97,7 @@ type State =
     }
   | { stage: "deleted" }
   | { stage: "gone"; gone: SecretGone; owner: boolean }
-  | { stage: "error"; title: string; message: string };
+  | { stage: "error"; title: string; message: string; owner?: boolean };
 
 /** The server did not accept the blob token: the link or password is wrong. */
 class BlobTokenRejectedError extends Error {}
@@ -437,7 +438,7 @@ export default function RetrievePage() {
     case "loading":
       return <RetrieveLoading />;
     case "error":
-      return <RetrieveError title={state.title} message={state.message} />;
+      return <RetrieveError title={state.title} message={state.message} owner={state.owner} />;
     case "deleted":
       return <ShareDeleted />;
     case "gone":
