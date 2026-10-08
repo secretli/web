@@ -219,12 +219,7 @@ export interface SecretMetadataResponse {
   expires_at: string;
   created_at: string;
   /** Whether someone other than the owner has opened a reusable secret. */
-  opened?: boolean;
-  /**
-   * What servers before `opened` sent: when a recipient first opened a
-   * reusable secret. Transition only; see secretOpened.
-   */
-  opened_at?: string;
+  opened: boolean;
 }
 
 export function getSecretMetadata(
@@ -237,29 +232,19 @@ export function getSecretMetadata(
   });
 }
 
-/**
- * Whether a reusable secret has been opened. A server that still sends
- * `opened_at` means the same by having it; its time is never shown.
- */
-export function secretOpened(meta: Pick<SecretMetadataResponse, "opened" | "opened_at">): boolean {
-  return meta.opened ?? Boolean(meta.opened_at);
-}
-
-// "expired" comes only from servers before an expired secret became a plain 404.
-export type SecretOutcome = "opened" | "expired" | "deleted";
+export type SecretOutcome = "opened" | "deleted";
 
 /**
  * What became of a secret that is gone: the details of the 410 the metadata
- * endpoint answers with until the secret would have expired. They tell no
- * time; servers before that also sent when it ended, when it was first opened
- * and whether the owner opened it, which is ignored.
+ * endpoint answers with until the secret would have expired. They say how it
+ * ended, and never when.
  */
 export interface SecretGone {
   readonly outcome: SecretOutcome;
   readonly burn_after_read: boolean;
 }
 
-const OUTCOMES: readonly string[] = ["opened", "expired", "deleted"];
+const OUTCOMES: readonly string[] = ["opened", "deleted"];
 
 /** The story behind a 410 from the metadata endpoint, or null for any other error. */
 export function secretGoneFromError(err: unknown): SecretGone | null {

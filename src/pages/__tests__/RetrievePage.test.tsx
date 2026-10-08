@@ -32,8 +32,8 @@ async function publishTextShare(
     burnAfterRead?: boolean;
     password?: string;
     ownerLink?: boolean;
-    /** What the metadata says of a reusable secret's opening: the new server's words or the old. */
-    opened?: { opened?: boolean; opened_at?: string };
+    /** Whether the metadata says someone other than the owner has opened the secret. */
+    opened?: boolean;
   } = {},
 ) {
   const baseKeySet = await KeySet.generateRandom();
@@ -56,7 +56,7 @@ async function publishTextShare(
     burn_after_read: options.burnAfterRead ?? false,
     expires_at: new Date(Date.now() + 3600_000).toISOString(),
     created_at: new Date().toISOString(),
-    ...options.opened,
+    opened: options.opened ?? false,
   });
   api.startRetrievalSession.mockImplementation(
     async (_publicID: string, blobToken: string): Promise<RetrievalSessionResponse> => {
@@ -304,51 +304,6 @@ describe("RetrievePage", () => {
     ).toBeTruthy();
   });
 
-  // Only servers before an expired secret became a plain 404 answer a 410 for it.
-  it.each([
-    [true, "Your secret expired", "Nothing is left on the server."],
-    [
-      false,
-      "This secret expired",
-      "Nothing is left on the server, so ask the sender for a new link if you still need it.",
-    ],
-  ])("still tells an expired secret (owner link: %s)", async (ownerLink, title, lead) => {
-    api.getSecretMetadata.mockRejectedValue(gone({ outcome: "expired", burn_after_read: true }));
-    await openLink(ownerLink);
-    render(<RetrievePage />);
-
-    expect(await screen.findByRole("heading", { name: title })).toBeTruthy();
-    expect(screen.getByText(lead)).toBeTruthy();
-  });
-
-  // Servers before this one also sent when it ended, when it was first opened
-  // and whether the owner opened it. The page tells none of that.
-  const EARLIER = {
-    ended_at: "2026-10-06T12:00:00Z",
-    first_opened_at: "2026-10-06T11:00:00Z",
-    opened_by_owner: true,
-  };
-
-  it.each([
-    [true, { outcome: "opened" }, "Your secret was opened"],
-    [false, { outcome: "opened" }, "This secret was already opened"],
-    [true, { outcome: "deleted" }, "Secret deleted"],
-    [false, { outcome: "deleted" }, "This secret was deleted"],
-    [true, { outcome: "expired" }, "Your secret expired"],
-  ])(
-    "ignores what an earlier server adds to the 410 (owner link: %s, %j)",
-    async (ownerLink, details, title) => {
-      api.getSecretMetadata.mockRejectedValue(
-        gone({ ...details, burn_after_read: true, ...EARLIER }),
-      );
-      await openLink(ownerLink);
-      render(<RetrievePage />);
-
-      expect(await screen.findByRole("heading", { name: title })).toBeTruthy();
-      expect(document.body.textContent).not.toMatch(/\d:\d\d|today|yesterday|2026/);
-    },
-  );
-
   it("finds out what happened when the secret goes away between showing and opening it", async () => {
     await publishTextShare({ burnAfterRead: true });
     render(<RetrievePage />);
@@ -363,25 +318,19 @@ describe("RetrievePage", () => {
     ).toBeTruthy();
   });
 
-  // The server says it with `opened`; one before it with `opened_at`, there
-  // only once a recipient opened it. Its time is never shown.
+  // The server says whether a recipient opened a reusable secret, never when.
   it.each([
-    [{ opened: true }, /This is your owner link\. It has been opened\. You can open the secret/],
-    [
-      { opened: false },
-      /This is your owner link\. Nobody has opened it yet\. You can open the secret/,
-    ],
-    [
-      { opened_at: "2026-10-06T12:00:00Z" },
-      /This is your owner link\. It has been opened\. You can open the secret/,
-    ],
-    [{}, /This is your owner link\. Nobody has opened it yet\. You can open the secret/],
-  ])("tells the owner of a reusable secret whether it was opened (%j)", async (opened, lead) => {
-    await publishTextShare({ ownerLink: true, opened });
-    render(<RetrievePage />);
+    [true, /This is your owner link\. It has been opened\. You can open the secret/],
+    [false, /This is your owner link\. Nobody has opened it yet\. You can open the secret/],
+  ])(
+    "tells the owner of a reusable secret whether it was opened (opened: %s)",
+    async (opened, lead) => {
+      await publishTextShare({ ownerLink: true, opened });
+      render(<RetrievePage />);
 
-    expect(await screen.findByText(lead)).toBeTruthy();
-  });
+      expect(await screen.findByText(lead)).toBeTruthy();
+    },
+  );
 
   it("sends the deletion token along when the owner opens their own secret", async () => {
     await publishTextShare({ ownerLink: true });

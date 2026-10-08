@@ -1,6 +1,6 @@
 import type { SecretMeta } from "@secretli/format";
 import { type FormEvent, useId, useRef, useState } from "react";
-import { type SecretMetadataResponse, secretOpened } from "../../lib/api";
+import type { SecretMetadataResponse } from "../../lib/api";
 import { formatExpiry, formatRelativeTime, formatSize } from "../../lib/format";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
@@ -19,7 +19,7 @@ export function revealLabel(clientMeta: SecretMeta): string {
 function ownerLead(serverMeta: SecretMetadataResponse): string {
   const opened = serverMeta.burn_after_read
     ? ""
-    : secretOpened(serverMeta)
+    : serverMeta.opened
       ? "It has been opened. "
       : "Nobody has opened it yet. ";
   return `This is your owner link. ${opened}You can open the secret, or delete it for everyone. The link expires ${formatExpiry(serverMeta.expires_at)}.`;

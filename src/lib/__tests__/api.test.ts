@@ -17,7 +17,6 @@ import {
   retryDelayMs,
   type StartUploadSessionParams,
   secretGoneFromError,
-  secretOpened,
   startRetrievalSession,
   startUploadSession,
   uploadSessionPart,
@@ -242,13 +241,14 @@ describe("getSecretMetadata", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns metadata with encrypted_meta", async () => {
+  it.each([true, false])("returns metadata with encrypted_meta (opened: %s)", async (opened) => {
     const mockResponse = {
       encrypted_meta: "v2$nonce$cipher",
       blob_size: 2048,
       burn_after_read: false,
       expires_at: "2026-03-01T00:00:00Z",
       created_at: "2026-02-28T00:00:00Z",
+      opened,
     };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify(mockResponse), { status: 200 }),
@@ -256,31 +256,6 @@ describe("getSecretMetadata", () => {
 
     const result = await getSecretMetadata("pub-id", "meta-token");
     expect(result).toEqual(mockResponse);
-  });
-
-  // Servers say whether a reusable secret was opened with `opened`; those
-  // before it with `opened_at`, which is there only once it was.
-  it.each([
-    [{ opened: true }, true],
-    [{ opened: false }, false],
-    [{ opened_at: "2026-02-28T12:00:00Z" }, true],
-    [{}, false],
-  ])("reads whether a secret was opened from %j", async (opened, expected) => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          encrypted_meta: "v2$nonce$cipher",
-          blob_size: 2048,
-          burn_after_read: false,
-          expires_at: "2026-03-01T00:00:00Z",
-          created_at: "2026-02-28T00:00:00Z",
-          ...opened,
-        }),
-        { status: 200 },
-      ),
-    );
-
-    expect(secretOpened(await getSecretMetadata("pub-id", "meta-token"))).toBe(expected);
   });
 });
 
@@ -464,32 +439,6 @@ describe("secretGoneFromError", () => {
     );
   });
 
-  it("ignores the times and the owner flag that earlier servers also sent", () => {
-    const details = {
-      outcome: "opened",
-      burn_after_read: true,
-      ended_at: "2026-10-06T12:00:00Z",
-      first_opened_at: "2026-10-06T11:00:00Z",
-      opened_by_owner: true,
-    };
-    expect(secretGoneFromError(gone(details))).toStrictEqual({
-      outcome: "opened",
-      burn_after_read: true,
-    });
-  });
-
-  it("still knows an expired secret, which earlier servers answered with a 410", () => {
-    const details = {
-      outcome: "expired",
-      burn_after_read: false,
-      ended_at: "2026-10-06T12:00:00Z",
-    };
-    expect(secretGoneFromError(gone(details))).toStrictEqual({
-      outcome: "expired",
-      burn_after_read: false,
-    });
-  });
-
   it("does not need burn_after_read", () => {
     expect(secretGoneFromError(gone({ outcome: "deleted" }))).toStrictEqual({
       outcome: "deleted",
@@ -499,6 +448,8 @@ describe("secretGoneFromError", () => {
 
   it("reads nothing out of anything but a 410 with a known outcome", () => {
     expect(secretGoneFromError(gone({ outcome: "vanished", burn_after_read: true }))).toBeNull();
+    // An expired secret answers 404, not a 410 with a reason.
+    expect(secretGoneFromError(gone({ outcome: "expired", burn_after_read: true }))).toBeNull();
     expect(secretGoneFromError(gone({ burn_after_read: true }))).toBeNull();
     expect(secretGoneFromError(gone())).toBeNull();
     expect(secretGoneFromError(new ApiError(404, "not found"))).toBeNull();
