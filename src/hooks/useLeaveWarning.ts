@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useLayoutEffect, useSyncExternalStore } from "react";
 
 // How many components currently have something to lose on leaving.
 let activeWarnings = 0;
@@ -27,7 +27,11 @@ function warnBeforeUnload(event: BeforeUnloadEvent) {
  * like a revealed one-time secret or a running upload.
  */
 export function useLeaveWarning(active: boolean) {
-  useEffect(() => {
+  // A layout effect, so the warning starts and ends in the commit that shows
+  // why. After a passive effect the links would keep reloading the page for a
+  // moment once the upload's result is on screen, and a click in that moment
+  // would not reach the router.
+  useLayoutEffect(() => {
     if (!active) return;
     if (activeWarnings++ === 0) window.addEventListener("beforeunload", warnBeforeUnload);
     notify();
