@@ -47,7 +47,9 @@ test.describe("Text secret sharing", () => {
     const ownerPage = await context.newPage();
     await ownerPage.goto(ownerUrl);
     await expect(ownerPage.locator("h1")).toHaveText("Your secret was opened", { timeout: 10000 });
-    await expect(ownerPage.getByText(/^Opened today at /)).toBeVisible();
+    await expect(
+      ownerPage.getByText("It was a one-time secret, so nothing is left on the server."),
+    ).toBeVisible();
     await expectAccessible(ownerPage);
 
     const latePage = await context.newPage();
@@ -139,7 +141,9 @@ test.describe("Text secret sharing", () => {
     // Coming back to the owner link later still says so.
     await page.goto(ownerUrl);
     await expect(page.locator("h1")).toHaveText("Secret deleted", { timeout: 10000 });
-    await expect(page.getByText(/^You deleted it today at /)).toBeVisible();
+    await expect(
+      page.getByText("You deleted it. The link doesn't open anything any more."),
+    ).toBeVisible();
     await expectAccessible(page);
 
     const recipientPage = await context.newPage();
@@ -147,6 +151,47 @@ test.describe("Text secret sharing", () => {
     await expect(recipientPage.locator("h1")).toHaveText("This secret was deleted", {
       timeout: 10000,
     });
-    await expect(recipientPage.getByText(/^The sender deleted it today at /)).toBeVisible();
+    await expect(
+      recipientPage.getByText(
+        "The sender deleted it. Ask the sender for a new link if you still need it.",
+      ),
+    ).toBeVisible();
+  });
+
+  test("owner link of a reusable secret says whether anyone has opened it", async ({
+    page,
+    context,
+  }) => {
+    const secretText = `Reusable secret ${Date.now()}`;
+
+    await page.goto("/share");
+    await page.fill("#secret-text", secretText);
+    await page.getByRole("button", { name: "Opens once" }).click();
+    await page.getByRole("button", { name: /Until it expires/ }).click();
+    await page.click('button[type="submit"]');
+    await expect(page.getByRole("heading", { name: "Your link is ready" })).toBeVisible({
+      timeout: 10000,
+    });
+    const shareUrl = await shownLink(page, "share-link");
+    const ownerUrl = await shownLink(page, "owner-link");
+
+    const before = await context.newPage();
+    await before.goto(ownerUrl);
+    await expect(
+      before.getByText(/^This is your owner link\. Nobody has opened it yet\. /),
+    ).toBeVisible({ timeout: 10000 });
+
+    // A recipient opens it.
+    const recipientPage = await context.newPage();
+    await recipientPage.goto(shareUrl);
+    await recipientPage.getByRole("button", { name: /^Reveal/ }).click();
+    await expect(recipientPage.locator("h1")).toHaveText("Here's your secret", { timeout: 10000 });
+
+    const after = await context.newPage();
+    await after.goto(ownerUrl);
+    await expect(
+      after.getByText(/^This is your owner link\. It has been opened\. You can open the secret/),
+    ).toBeVisible({ timeout: 10000 });
+    await expectAccessible(after);
   });
 });

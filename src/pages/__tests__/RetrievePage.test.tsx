@@ -32,7 +32,8 @@ async function publishTextShare(
     burnAfterRead?: boolean;
     password?: string;
     ownerLink?: boolean;
-    openedAt?: string;
+    /** What the metadata says of a reusable secret's opening: the new server's words or the old. */
+    opened?: { opened?: boolean; opened_at?: string };
   } = {},
 ) {
   const baseKeySet = await KeySet.generateRandom();
@@ -55,7 +56,7 @@ async function publishTextShare(
     burn_after_read: options.burnAfterRead ?? false,
     expires_at: new Date(Date.now() + 3600_000).toISOString(),
     created_at: new Date().toISOString(),
-    ...(options.openedAt ? { opened_at: options.openedAt } : {}),
+    ...options.opened,
   });
   api.startRetrievalSession.mockImplementation(
     async (_publicID: string, blobToken: string): Promise<RetrievalSessionResponse> => {
@@ -211,7 +212,7 @@ describe("RetrievePage", () => {
     expect(api.getSecretMetadata).not.toHaveBeenCalled();
   });
 
-  it("names every reason a share can be gone, including a one-time share already opened", async () => {
+  it("answers a link the server has nothing for as it would one that expired", async () => {
     await publishTextShare();
     api.getSecretMetadata.mockImplementation(async () => {
       throw new ApiError(404, "secret not found");
@@ -219,7 +220,20 @@ describe("RetrievePage", () => {
     render(<RetrievePage />);
 
     expect(await screen.findByRole("heading", { name: "This secret is gone" })).toBeTruthy();
-    expect(screen.getByText(/It was opened already, or it expired\./)).toBeTruthy();
+    expect(screen.getByText(/It may have expired, been opened or been deleted\./)).toBeTruthy();
+    expect(screen.getByText(/ask the sender for a new link/)).toBeTruthy();
+  });
+
+  it("does not send an owner to the sender when the server has nothing for their link", async () => {
+    await publishTextShare({ ownerLink: true });
+    api.getSecretMetadata.mockImplementation(async () => {
+      throw new ApiError(404, "secret not found");
+    });
+    render(<RetrievePage />);
+
+    expect(await screen.findByRole("heading", { name: "This secret is gone" })).toBeTruthy();
+    expect(screen.getByText(/It may have expired, been opened or been deleted\./)).toBeTruthy();
+    expect(screen.queryByText(/ask the sender/)).toBeNull();
   });
 
   it("ends on an error page when a burn-after-read session expires", async () => {
@@ -234,7 +248,7 @@ describe("RetrievePage", () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  /** The 410 the metadata endpoint answers with once the server only remembers a secret. */
+  /** The 410 the metadata endpoint answers with until the secret would have expired. */
   function gone(details: Record<string, unknown>) {
     return new ApiError(410, "secret is gone", undefined, undefined, details);
   }
@@ -245,34 +259,18 @@ describe("RetrievePage", () => {
   }
 
   it("tells the owner when their one-time secret was opened", async () => {
-    const openedAt = new Date().toISOString();
-    api.getSecretMetadata.mockRejectedValue(
-      gone({
-        outcome: "opened",
-        burn_after_read: true,
-        ended_at: openedAt,
-        first_opened_at: openedAt,
-        opened_by_owner: false,
-      }),
-    );
+    api.getSecretMetadata.mockRejectedValue(gone({ outcome: "opened", burn_after_read: true }));
     await openLink(true);
     render(<RetrievePage />);
 
     expect(await screen.findByRole("heading", { name: "Your secret was opened" })).toBeTruthy();
-    expect(screen.getByText(/^Opened today at /)).toBeTruthy();
+    expect(
+      screen.getByText("It was a one-time secret, so nothing is left on the server."),
+    ).toBeTruthy();
   });
 
   it("warns a recipient when someone already opened the one-time secret", async () => {
-    const openedAt = new Date().toISOString();
-    api.getSecretMetadata.mockRejectedValue(
-      gone({
-        outcome: "opened",
-        burn_after_read: true,
-        ended_at: openedAt,
-        first_opened_at: openedAt,
-        opened_by_owner: false,
-      }),
-    );
+    api.getSecretMetadata.mockRejectedValue(gone({ outcome: "opened", burn_after_read: true }));
     await openLink(false);
     render(<RetrievePage />);
 
@@ -282,54 +280,81 @@ describe("RetrievePage", () => {
     expect(screen.getByText(/tell the sender/)).toBeTruthy();
   });
 
-  it("tells the owner their secret expired unopened", async () => {
-    api.getSecretMetadata.mockRejectedValue(
-      gone({
-        outcome: "expired",
-        burn_after_read: true,
-        ended_at: new Date().toISOString(),
-        opened_by_owner: false,
-      }),
-    );
+  it("tells the owner that they deleted the secret", async () => {
+    api.getSecretMetadata.mockRejectedValue(gone({ outcome: "deleted", burn_after_read: true }));
     await openLink(true);
     render(<RetrievePage />);
 
+    expect(await screen.findByRole("heading", { name: "Secret deleted" })).toBeTruthy();
     expect(
-      await screen.findByRole("heading", { name: "Your secret expired unopened" }),
+      screen.getByText("You deleted it. The link doesn't open anything any more."),
     ).toBeTruthy();
   });
 
   it("tells a recipient that the sender deleted the secret", async () => {
-    api.getSecretMetadata.mockRejectedValue(
-      gone({
-        outcome: "deleted",
-        burn_after_read: false,
-        ended_at: new Date().toISOString(),
-        opened_by_owner: false,
-      }),
-    );
+    api.getSecretMetadata.mockRejectedValue(gone({ outcome: "deleted", burn_after_read: false }));
     await openLink(false);
     render(<RetrievePage />);
 
     expect(await screen.findByRole("heading", { name: "This secret was deleted" })).toBeTruthy();
-    expect(screen.getByText(/^The sender deleted it today at /)).toBeTruthy();
+    expect(
+      screen.getByText(
+        "The sender deleted it. Ask the sender for a new link if you still need it.",
+      ),
+    ).toBeTruthy();
   });
+
+  // Only servers before an expired secret became a plain 404 answer a 410 for it.
+  it.each([
+    [true, "Your secret expired", "Nothing is left on the server."],
+    [
+      false,
+      "This secret expired",
+      "Nothing is left on the server, so ask the sender for a new link if you still need it.",
+    ],
+  ])("still tells an expired secret (owner link: %s)", async (ownerLink, title, lead) => {
+    api.getSecretMetadata.mockRejectedValue(gone({ outcome: "expired", burn_after_read: true }));
+    await openLink(ownerLink);
+    render(<RetrievePage />);
+
+    expect(await screen.findByRole("heading", { name: title })).toBeTruthy();
+    expect(screen.getByText(lead)).toBeTruthy();
+  });
+
+  // Servers before this one also sent when it ended, when it was first opened
+  // and whether the owner opened it. The page tells none of that.
+  const EARLIER = {
+    ended_at: "2026-10-06T12:00:00Z",
+    first_opened_at: "2026-10-06T11:00:00Z",
+    opened_by_owner: true,
+  };
+
+  it.each([
+    [true, { outcome: "opened" }, "Your secret was opened"],
+    [false, { outcome: "opened" }, "This secret was already opened"],
+    [true, { outcome: "deleted" }, "Secret deleted"],
+    [false, { outcome: "deleted" }, "This secret was deleted"],
+    [true, { outcome: "expired" }, "Your secret expired"],
+  ])(
+    "ignores what an earlier server adds to the 410 (owner link: %s, %j)",
+    async (ownerLink, details, title) => {
+      api.getSecretMetadata.mockRejectedValue(
+        gone({ ...details, burn_after_read: true, ...EARLIER }),
+      );
+      await openLink(ownerLink);
+      render(<RetrievePage />);
+
+      expect(await screen.findByRole("heading", { name: title })).toBeTruthy();
+      expect(document.body.textContent).not.toMatch(/\d:\d\d|today|yesterday|2026/);
+    },
+  );
 
   it("finds out what happened when the secret goes away between showing and opening it", async () => {
     await publishTextShare({ burnAfterRead: true });
     render(<RetrievePage />);
     await screen.findByRole("button", { name: "Reveal secret" });
-    const openedAt = new Date().toISOString();
     api.startRetrievalSession.mockRejectedValue(new ApiError(404, "secret not found"));
-    api.getSecretMetadata.mockRejectedValueOnce(
-      gone({
-        outcome: "opened",
-        burn_after_read: true,
-        ended_at: openedAt,
-        first_opened_at: openedAt,
-        opened_by_owner: false,
-      }),
-    );
+    api.getSecretMetadata.mockRejectedValueOnce(gone({ outcome: "opened", burn_after_read: true }));
 
     fireEvent.click(screen.getByRole("button", { name: "Reveal secret" }));
 
@@ -338,11 +363,24 @@ describe("RetrievePage", () => {
     ).toBeTruthy();
   });
 
-  it("tells the owner of a reusable secret when it was first opened", async () => {
-    await publishTextShare({ ownerLink: true, openedAt: new Date().toISOString() });
+  // The server says it with `opened`; one before it with `opened_at`, there
+  // only once a recipient opened it. Its time is never shown.
+  it.each([
+    [{ opened: true }, /This is your owner link\. It has been opened\. You can open the secret/],
+    [
+      { opened: false },
+      /This is your owner link\. Nobody has opened it yet\. You can open the secret/,
+    ],
+    [
+      { opened_at: "2026-10-06T12:00:00Z" },
+      /This is your owner link\. It has been opened\. You can open the secret/,
+    ],
+    [{}, /This is your owner link\. Nobody has opened it yet\. You can open the secret/],
+  ])("tells the owner of a reusable secret whether it was opened (%j)", async (opened, lead) => {
+    await publishTextShare({ ownerLink: true, opened });
     render(<RetrievePage />);
 
-    expect(await screen.findByText(/It was first opened today at /)).toBeTruthy();
+    expect(await screen.findByText(lead)).toBeTruthy();
   });
 
   it("sends the deletion token along when the owner opens their own secret", async () => {
