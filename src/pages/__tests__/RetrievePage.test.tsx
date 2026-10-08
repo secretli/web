@@ -236,6 +236,23 @@ describe("RetrievePage", () => {
     expect(screen.queryByText(/ask the sender/)).toBeNull();
   });
 
+  it.each([
+    [true, "Share another secret", "/"],
+    [false, "Share a secret of your own", "/share"],
+  ])(
+    "leads on from a link the server has nothing for (owner link: %s)",
+    async (ownerLink, label, href) => {
+      await publishTextShare({ ownerLink });
+      api.getSecretMetadata.mockImplementation(async () => {
+        throw new ApiError(404, "secret not found");
+      });
+      render(<RetrievePage />);
+
+      const back = await screen.findByRole("link", { name: `← ${label}` });
+      expect(back.getAttribute("href")).toBe(href);
+    },
+  );
+
   it("ends on an error page when a burn-after-read session expires", async () => {
     await publishTextShare({ burnAfterRead: true });
     failNextRangeRead(new ApiError(403, "invalid retrieval session"));

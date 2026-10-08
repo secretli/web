@@ -11,12 +11,21 @@ export function RetrieveLoading() {
   );
 }
 
-export function RetrieveError({ title, message }: { title: string; message: string }) {
+export function RetrieveError({
+  title,
+  message,
+  owner = false,
+}: {
+  title: string;
+  message: string;
+  /** Whether the link that was opened is the owner link, for the errors that know. */
+  owner?: boolean;
+}) {
   return (
     <div className="space-y-8">
       <PageTitle lead={message}>{title}</PageTitle>
-      <a href="/share" className={textButtonClass("muted")}>
-        ← Share a secret of your own
+      <a href={owner ? "/" : "/share"} className={textButtonClass("muted")}>
+        ← {owner ? "Share another secret" : "Share a secret of your own"}
       </a>
     </div>
   );
