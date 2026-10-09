@@ -1,4 +1,9 @@
-import { createEncryptedBundle, KeySet, type SecretMeta } from "@secretli/format";
+import {
+  createEncryptedBundle,
+  createStreamBundle,
+  KeySet,
+  type SecretMeta,
+} from "@secretli/format";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { ApiError, type RetrievalSessionResponse } from "../../lib/api";
@@ -23,35 +28,55 @@ const SECRET_TEXT = "the launch code is 0000";
 // slow on CI runners; waits that follow a password submit get more time.
 const AFTER_PASSWORD = { timeout: 15_000 };
 
+interface ShareOptions {
+  burnAfterRead?: boolean;
+  password?: string;
+  ownerLink?: boolean;
+  /** Whether the metadata says someone other than the owner has opened the secret. */
+  opened?: boolean;
+  /** What the metadata says the secret is, for a kind this version doesn't know. */
+  type?: string;
+  /** The bundle version to write; 3 unless set. */
+  version?: 2 | 3;
+  /** When the retrieval session ends; in 15 minutes unless set. */
+  sessionExpiresAt?: string;
+}
+
+/** Publishes a text share; see publishShare. */
+function publishTextShare(options: ShareOptions = {}) {
+  return publishShare([new File([SECRET_TEXT], "secret.txt", { type: "text/plain" })], {
+    type: "text",
+    ...options,
+  });
+}
+
+/** Publishes files, each holding the text it is named after, as one share; see publishShare. */
+function publishFiles(contents: Record<string, string>, options: ShareOptions = {}) {
+  const files = Object.entries(contents).map(
+    ([name, text]) => new File([text], name, { type: "text/plain" }),
+  );
+  return publishShare(files, { type: "bundle", ...options });
+}
+
 /**
- * Publishes a text share on a fake server: metadata and blob are really
+ * Publishes a share on a fake server: metadata and blob are really
  * encrypted, so the page decrypts them exactly as it would in production.
  */
-async function publishTextShare(
-  options: {
-    burnAfterRead?: boolean;
-    password?: string;
-    ownerLink?: boolean;
-    /** Whether the metadata says someone other than the owner has opened the secret. */
-    opened?: boolean;
-    /** What the metadata says the secret is, for a kind this version doesn't know. */
-    type?: string;
-  } = {},
-) {
+async function publishShare(files: File[], options: ShareOptions) {
   const baseKeySet = await KeySet.generateRandom();
   const shareSecret = baseKeySet.getEncoded().shareSecret;
   const blobKeySet = options.password
     ? await KeySet.fromShareSecret(shareSecret, options.password)
     : baseKeySet;
-  const { blob } = await createEncryptedBundle(
-    [new File([SECRET_TEXT], "secret.txt", { type: "text/plain" })],
-    blobKeySet,
-  );
+  const { blob } =
+    options.version === 2
+      ? await createEncryptedBundle(files, blobKeySet)
+      : await createStreamBundle(files, blobKeySet);
   const bytes = new Uint8Array(await blob.arrayBuffer());
 
   api.getSecretMetadata.mockResolvedValue({
     encrypted_meta: await baseKeySet.encryptMeta({
-      type: (options.type ?? "text") as SecretMeta["type"],
+      type: options.type as SecretMeta["type"],
       password_protected: options.password !== undefined,
     }),
     blob_size: bytes.length,
@@ -68,7 +93,7 @@ async function publishTextShare(
       return {
         session_token: "session-token",
         blob_size: bytes.length,
-        expires_at: new Date(Date.now() + 900_000).toISOString(),
+        expires_at: options.sessionExpiresAt ?? new Date(Date.now() + 900_000).toISOString(),
         burn_after_read: options.burnAfterRead ?? false,
       };
     },
@@ -100,6 +125,17 @@ describe("RetrievePage", () => {
   beforeEach(() => {
     for (const fn of Object.values(api)) fn.mockReset();
     vi.mocked(toast.error).mockClear();
+  });
+
+  it.each([3, 2] as const)("reveals a text secret (bundle version %i)", async (version) => {
+    await publishTextShare({ version });
+    render(<RetrievePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reveal secret" }));
+
+    expect(await screen.findByText(SECRET_TEXT)).toBeTruthy();
+    // A small bundle is fetched whole, once.
+    expect(api.retrieveSecretRange).toHaveBeenCalledTimes(1);
   });
 
   it("retries a burn-after-read share with the session it already started", async () => {
@@ -479,5 +515,25 @@ describe("RetrievePage", () => {
       expect.any(String),
       "D".repeat(43),
     );
+  });
+
+  describe("files", () => {
+    const FILES = { "alpha.txt": "first file", "bravo.txt": "second file", "charlie.txt": "third" };
+
+    async function showFiles() {
+      fireEvent.click(await screen.findByRole("button", { name: "Show the files" }));
+      await screen.findByRole("heading", { name: /^Here( are your files|'s your file)$/ });
+    }
+
+    it.each([3, 2] as const)("lists the files by name (bundle version %i)", async (version) => {
+      await publishFiles(FILES, { version });
+      render(<RetrievePage />);
+      await showFiles();
+
+      expect(screen.getByText("3 files · 26 B")).toBeTruthy();
+      for (const [index, name] of Object.keys(FILES).entries()) {
+        expect(screen.getByTestId(`bundle-file-${index}`).textContent).toContain(name);
+      }
+    });
   });
 });

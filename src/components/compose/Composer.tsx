@@ -8,11 +8,7 @@ import {
   useState,
 } from "react";
 import { formatExpiration } from "../../lib/expiration";
-import {
-  fitsBundleManifestLimit,
-  fitsBundleUploadLimit,
-  MAX_UPLOAD_LABEL,
-} from "../../lib/uploadLimits";
+import { bundleLimitError } from "../../lib/uploadLimits";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
 import IconButton from "../ui/IconButton";
@@ -108,12 +104,9 @@ export default function Composer({ onSubmit, busy, initialText = "" }: ComposerP
     (added: File[]) => {
       if (added.length === 0) return;
       const next = merge(files, added);
-      if (!fitsBundleUploadLimit(next.map((file) => file.size))) {
-        setFileError(`Together these files exceed the ${MAX_UPLOAD_LABEL} limit.`);
-        return;
-      }
-      if (!fitsBundleManifestLimit(next)) {
-        setFileError("Too many files for one link. Zip them first, or split them up.");
+      const error = bundleLimitError(next);
+      if (error) {
+        setFileError(error);
         return;
       }
       setFileError(null);

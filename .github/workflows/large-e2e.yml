@@ -10,7 +10,7 @@ on:
       size_mib:
         description: "Synthetic file size in MiB"
         required: false
-        default: "1023"
+        default: "1000"
       max_total_ms:
         description: "Optional total runtime threshold in milliseconds"
         required: false
@@ -70,7 +70,7 @@ jobs:
 
       - name: Large-file Playwright E2E
         env:
-          LARGE_E2E_SIZE_MB: ${{ inputs.size_mib || '1023' }}
+          LARGE_E2E_SIZE_MB: ${{ inputs.size_mib || '1000' }}
           LARGE_E2E_MAX_TOTAL_MS: ${{ inputs.max_total_ms }}
           LARGE_E2E_MAX_HEAP_MIB: ${{ inputs.max_heap_mib }}
         run: pnpm e2e:large

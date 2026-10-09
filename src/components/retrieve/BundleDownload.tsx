@@ -1,4 +1,4 @@
-import { type BundleManifest, type DecryptedBundleFile, manifestTotalSize } from "@secretli/format";
+import type { BundleEntry, DecryptedEntry } from "@secretli/format";
 import { useEffect, useState } from "react";
 import { useLeaveWarning } from "../../hooks/useLeaveWarning";
 import { saveBlob } from "../../lib/download";
@@ -39,21 +39,23 @@ function formatCountdown(seconds: number): string {
 }
 
 interface BundleDownloadProps {
-  manifest: BundleManifest;
+  files: readonly BundleEntry[];
+  totalSize: number;
   sessionExpiresAt: string;
   burnAfterRead: boolean;
   downloading: boolean;
   progress: DownloadProgress | null;
-  downloadedFiles: DecryptedBundleFile[] | null;
+  downloadedFiles: DecryptedEntry[] | null;
   canDelete: boolean;
   deleting: boolean;
   onDownloadAll: () => void;
   onDelete: () => void;
 }
 
-/** The file list and download controls once the manifest has been read. */
+/** The file list and download controls once the bundle has been opened. */
 export default function BundleDownload({
-  manifest,
+  files,
+  totalSize,
   sessionExpiresAt,
   burnAfterRead,
   downloading,
@@ -64,8 +66,7 @@ export default function BundleDownload({
   onDownloadAll,
   onDelete,
 }: BundleDownloadProps) {
-  const isMulti = manifest.files.length > 1;
-  const totalSize = manifestTotalSize(manifest);
+  const isMulti = files.length > 1;
   const secondsLeft = useSecondsUntil(sessionExpiresAt);
   // Once the blobs are in memory the server session no longer matters.
   const expired = secondsLeft === 0 && !downloadedFiles;
@@ -89,19 +90,17 @@ export default function BundleDownload({
 
   return (
     <div className="space-y-7">
-      <PageTitle
-        lead={`${manifest.files.length} ${isMulti ? "files" : "file"} · ${formatSize(totalSize)}`}
-      >
+      <PageTitle lead={`${files.length} ${isMulti ? "files" : "file"} · ${formatSize(totalSize)}`}>
         {isMulti ? "Here are your files" : "Here's your file"}
       </PageTitle>
 
       <div className="overflow-hidden rounded-[20px] border border-line bg-surface shadow-card">
         <ul className="m-0 list-none px-2.5 pt-2.5 pb-1.5">
-          {manifest.files.map((file) => {
-            const downloaded = downloadedFiles?.find((entry) => entry.file.index === file.index);
+          {files.map((file) => {
+            const downloaded = downloadedFiles?.find(({ entry }) => entry.index === file.index);
             return (
               <li
-                key={`${file.index}-${file.path}`}
+                key={file.index}
                 data-testid={`bundle-file-${file.index}`}
                 className="flex min-h-13 items-center gap-3 pr-2 pl-3.5"
               >
@@ -110,13 +109,13 @@ export default function BundleDownload({
                 </span>
                 <span
                   className="min-w-0 flex-1 truncate font-mono text-sm text-ink"
-                  title={file.path}
+                  title={file.name}
                 >
-                  {file.path}
+                  {file.name}
                 </span>
                 <span className="text-[13px] tabular-nums text-faint">{formatSize(file.size)}</span>
                 {downloaded && (
-                  <TextButton onClick={() => saveBlob(downloaded.blob, downloaded.file.name)}>
+                  <TextButton onClick={() => saveBlob(downloaded.blob, downloaded.entry.name)}>
                     Save
                   </TextButton>
                 )}

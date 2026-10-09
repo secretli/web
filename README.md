@@ -79,7 +79,7 @@ cosign verify ghcr.io/secretli/web:main \
 `@secretli/format` is a dependency on a release archive of secretli/format, pinned by URL in `package.json` and by hash in the lockfile. Dependabot cannot follow such a dependency, so a new format release is adopted by hand:
 
 ```bash
-pnpm add https://github.com/secretli/format/releases/download/v0.2.0/secretli-format-0.2.0.tgz
+pnpm add https://github.com/secretli/format/releases/download/v0.4.0/secretli-format-0.4.0.tgz
 ```
 
 ## License

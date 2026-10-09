@@ -1,13 +1,10 @@
 import {
-  type BundleManifest,
-  cachingRangeFetcher,
-  type DecryptedBundleFile,
+  type DecryptedEntry,
   DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
-  decryptBundleFiles,
   isShareFragment,
   KeySet,
-  manifestTotalSize,
-  readBundleManifest,
+  type OpenedBundle,
+  openBundle,
   type SecretMeta,
 } from "@secretli/format";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -88,10 +85,8 @@ type State =
   | {
       stage: "bundle-ready";
       identity: ShareIdentity;
-      manifest: BundleManifest;
-      blobKeySet: KeySet;
-      publicID: string;
-      sessionToken: string;
+      /** Reads the files through the retrieval session it was opened with. */
+      bundle: OpenedBundle;
       sessionExpiresAt: string;
       burnAfterRead: boolean;
     }
@@ -130,7 +125,7 @@ export default function RetrievePage() {
   const [deleting, setDeleting] = useState(false);
   const [downloadingBundle, setDownloadingBundle] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
-  const [downloadedFiles, setDownloadedFiles] = useState<DecryptedBundleFile[] | null>(null);
+  const [downloadedFiles, setDownloadedFiles] = useState<DecryptedEntry[] | null>(null);
   // Starting a retrieval session is what burns a burn-after-read share, so a
   // started session is kept and reused until the server stops accepting it. A
   // failure while reading must not throw away the only chance to read.
@@ -247,20 +242,20 @@ export default function RetrievePage() {
       identity.deletionToken,
     );
 
-    let manifest: BundleManifest;
+    let bundle: OpenedBundle;
     let text: string | undefined;
     try {
-      const fetchRange = await cachingRangeFetcher(
+      // Text and files share one storage format, so both start the same way.
+      // Opening fetches a small bundle whole, and the opened bundle keeps
+      // what it fetched, so nothing is fetched twice.
+      bundle = await openBundle(
         (start: number, end: number) =>
           retrieveSecretRange(publicID, session.session_token, start, end),
+        blobKeySet,
         session.blob_size,
       );
-
-      // Text and files share one storage format, so both start the same way.
-      ({ manifest } = await readBundleManifest(fetchRange, blobKeySet, session.blob_size));
       if (clientMeta.type === "text") {
-        const [only] = await decryptBundleFiles(manifest.files, blobKeySet, fetchRange);
-        text = await only.blob.text();
+        text = await (await bundle.decryptFile(0)).text();
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
@@ -279,10 +274,7 @@ export default function RetrievePage() {
     setState({
       stage: "bundle-ready",
       identity,
-      manifest,
-      blobKeySet,
-      publicID,
-      sessionToken: session.session_token,
+      bundle,
       sessionExpiresAt: session.expires_at,
       burnAfterRead: session.burn_after_read,
     });
@@ -395,8 +387,8 @@ export default function RetrievePage() {
 
   async function downloadAll() {
     if (state.stage !== "bundle-ready") return;
-    const { blobKeySet, manifest, publicID, sessionToken } = state;
-    const totalSize = manifestTotalSize(manifest);
+    const { bundle } = state;
+    const { totalSize } = bundle;
 
     // Already decrypted once (for example a browser blocked some of the
     // saves): just hand the blobs to the browser again.
@@ -408,9 +400,7 @@ export default function RetrievePage() {
     setDownloadingBundle(true);
     setDownloadProgress({ fraction: 0, label: `0 B / ${formatSize(totalSize)}` });
     try {
-      const fetchRange = (start: number, end: number) =>
-        retrieveSecretRange(publicID, sessionToken, start, end);
-      const files = await decryptBundleFiles(manifest.files, blobKeySet, fetchRange, {
+      const files = await bundle.decryptFiles(undefined, {
         maxCoalescedPlaintextBytes: DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
         onProgress: ({ decryptedBytes }) => {
           const done = Math.min(decryptedBytes, totalSize);
@@ -434,8 +424,8 @@ export default function RetrievePage() {
     }
   }
 
-  function saveDecrypted(files: DecryptedBundleFile[]) {
-    return saveFilesSequentially(files.map(({ file, blob }) => ({ name: file.name, blob })));
+  function saveDecrypted(files: DecryptedEntry[]) {
+    return saveFilesSequentially(files.map(({ entry, blob }) => ({ name: entry.name, blob })));
   }
 
   switch (state.stage) {
@@ -476,7 +466,8 @@ export default function RetrievePage() {
     case "bundle-ready":
       return (
         <BundleDownload
-          manifest={state.manifest}
+          files={state.bundle.files}
+          totalSize={state.bundle.totalSize}
           sessionExpiresAt={state.sessionExpiresAt}
           burnAfterRead={state.burnAfterRead}
           downloading={downloadingBundle}
