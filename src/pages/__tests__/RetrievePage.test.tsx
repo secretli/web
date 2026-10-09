@@ -5,6 +5,7 @@ import { ApiError, type RetrievalSessionResponse } from "../../lib/api";
 import RetrievePage from "../RetrievePage";
 
 const api = vi.hoisted(() => ({
+  deleteSecret: vi.fn(),
   getSecretMetadata: vi.fn(),
   startRetrievalSession: vi.fn(),
   retrieveSecretRange: vi.fn(),
@@ -268,6 +269,23 @@ describe("RetrievePage", () => {
       expect(screen.getByText(lead)).toBeTruthy();
     },
   );
+
+  it("says the secret is gone when the owner deletes one that already is", async () => {
+    await publishTextShare({ burnAfterRead: true, ownerLink: true });
+    api.deleteSecret.mockRejectedValue(new ApiError(404, "secret not found"));
+    render(<RetrievePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete it now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+
+    expect(await screen.findByRole("heading", { name: "This secret is gone" })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "It may have expired, been opened or been deleted. Nothing is left on the server.",
+      ),
+    ).toBeTruthy();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
 
   async function reveal() {
     const button = await screen.findByRole("button", { name: "Reveal secret" });

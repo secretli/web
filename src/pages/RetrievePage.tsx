@@ -32,18 +32,13 @@ import {
 } from "../lib/api";
 import { saveFilesSequentially } from "../lib/download";
 import { formatSize } from "../lib/format";
+import { GONE_TITLE, goneMessage } from "../lib/gone";
 
-/**
- * The server has no secret for this link and cannot tell why: it keeps
- * nothing about a secret once it is gone, so one that was opened, deleted or
- * expired answers like one that never existed. The owner is the sender, so
- * there is nobody to ask for a new link.
- */
+/** The server has no secret for this link and cannot tell why (see goneMessage). */
 function notFound(owner: boolean): { title: string; message: string; owner: boolean } {
-  const why = "It may have expired, been opened or been deleted. Nothing is left on the server";
   return {
-    title: "This secret is gone",
-    message: owner ? `${why}.` : `${why}, so ask the sender for a new link if you still need it.`,
+    title: GONE_TITLE,
+    message: goneMessage(owner),
     owner,
   };
 }
@@ -372,6 +367,12 @@ export default function RetrievePage() {
       setState({ stage: "deleted" });
       toast.success("Secret deleted");
     } catch (err) {
+      // Gone already, opened, deleted elsewhere or expired: say so as the
+      // link itself would, not with the server's words.
+      if (err instanceof ApiError && err.status === 404) {
+        setState({ stage: "error", ...notFound(true) });
+        return;
+      }
       toast.error(err instanceof ApiError ? err.message : "Failed to delete the secret.");
     } finally {
       setDeleting(false);
