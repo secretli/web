@@ -222,6 +222,10 @@ export interface SecretMetadataResponse {
   opened: boolean;
 }
 
+/**
+ * The metadata of a live secret. One that is gone, whether it was opened
+ * (one-time), deleted or expired, answers 404 like one that never existed.
+ */
 export function getSecretMetadata(
   publicID: string,
   metadataToken: string,
@@ -230,28 +234,6 @@ export function getSecretMetadata(
     method: "GET",
     headers: { "X-Metadata-Token": metadataToken },
   });
-}
-
-export type SecretOutcome = "opened" | "deleted";
-
-/**
- * What became of a secret that is gone: the details of the 410 the metadata
- * endpoint answers with until the secret would have expired. They say how it
- * ended, and never when.
- */
-export interface SecretGone {
-  readonly outcome: SecretOutcome;
-  readonly burn_after_read: boolean;
-}
-
-const OUTCOMES: readonly string[] = ["opened", "deleted"];
-
-/** The story behind a 410 from the metadata endpoint, or null for any other error. */
-export function secretGoneFromError(err: unknown): SecretGone | null {
-  if (!(err instanceof ApiError) || err.status !== 410 || !err.details) return null;
-  const { outcome, burn_after_read } = err.details;
-  if (typeof outcome !== "string" || !OUTCOMES.includes(outcome)) return null;
-  return { outcome: outcome as SecretOutcome, burn_after_read: Boolean(burn_after_read) };
 }
 
 // --- Delete ---

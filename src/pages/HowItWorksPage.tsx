@@ -68,15 +68,15 @@ export default function HowItWorksPage() {
           the tokens.
         </p>
         <p>
-          When a one-time secret is opened, or a secret is deleted, the server keeps a note of which
-          of the two it was, but not when. A reusable secret gets a note of whether someone has
-          opened it, not when. The notes hold no content, and only a link to the secret can read
-          them. That is how the owner link, and the link itself, can tell you what happened.
+          A reusable secret also gets a mark of whether someone other than you has opened it, but
+          not when. Only a link to the secret can read it; that is how the owner link can tell you.
         </p>
         <p>
-          Notes last only until the secret would have expired anyway. Once its expiry passes,
-          nothing about the secret is left, so an expired link gets the same answer as one that
-          never existed.
+          When a one-time secret is opened, when a secret is deleted and when it expires, its link
+          gets the same answer from then on as one that never existed, so not even the owner link
+          can tell which of the three happened. Apart from a download still running, nothing is left
+          but the public ID, and only until the secret would have expired: it stays taken so that
+          nobody can put a secret of their own under the same link.
         </p>
         <p>
           That is all. The server cannot read the content, cannot see the file names, and cannot
@@ -109,8 +109,8 @@ export default function HowItWorksPage() {
         <p>
           Your owner link is the recipient's link with a deletion token after <Code>!</Code>. It
           opens the secret too, so keep it to yourself. What it adds is the right to delete the
-          secret for everyone and, until it expires, word of what became of it: opened, or deleted
-          by you.
+          secret for everyone and, while a reusable secret lasts, word of whether someone has opened
+          it. Once a secret is gone, the owner link says only that, like any other link to it.
         </p>
       </Section>
 

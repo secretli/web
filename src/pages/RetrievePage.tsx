@@ -18,7 +18,6 @@ import {
   ShareDeleted,
 } from "../components/retrieve/RetrieveStatus";
 import ShareDetails from "../components/retrieve/ShareDetails";
-import ShareGone from "../components/retrieve/ShareGone";
 import TextResult from "../components/retrieve/TextResult";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
@@ -28,16 +27,15 @@ import {
   isTransientStatus,
   type RetrievalSessionResponse,
   retrieveSecretRange,
-  type SecretGone,
   type SecretMetadataResponse,
-  secretGoneFromError,
   startRetrievalSession,
 } from "../lib/api";
 import { saveFilesSequentially } from "../lib/download";
 import { formatSize } from "../lib/format";
 
 /**
- * The server has no secret for this link and cannot tell why: one that
+ * The server has no secret for this link and cannot tell why: it keeps
+ * nothing about a secret once it is gone, so one that was opened, deleted or
  * expired answers like one that never existed. The owner is the sender, so
  * there is nobody to ask for a new link.
  */
@@ -91,7 +89,6 @@ type State =
       burnAfterRead: boolean;
     }
   | { stage: "deleted" }
-  | { stage: "gone"; gone: SecretGone; owner: boolean }
   | { stage: "error"; title: string; message: string; owner: boolean };
 
 /** The server did not accept the blob token: the link or password is wrong. */
@@ -175,10 +172,7 @@ export default function RetrievePage() {
         meta: { serverMeta, clientMeta },
       });
     } catch (err) {
-      const gone = secretGoneFromError(err);
-      if (gone) {
-        setState({ stage: "gone", gone, owner });
-      } else if (err instanceof ApiError) {
+      if (err instanceof ApiError) {
         if (err.status === 404) {
           setState({ stage: "error", ...notFound(owner) });
         } else if (err.status === 403) {
@@ -355,8 +349,8 @@ export default function RetrievePage() {
       return;
     }
     if (err.status === 404) {
-      // It went away between showing it and opening it; the server can say why.
-      void explainGone(identity);
+      // It went away between showing it and opening it.
+      setState({ stage: "error", ...notFound(owner) });
     } else if (err.status === 429) {
       toast.error("Too many attempts. Please wait a minute and try again.");
     } else if (err.status === 0) {
@@ -365,19 +359,6 @@ export default function RetrievePage() {
       toast.error("The server could not complete the request. Please try again.");
     } else {
       setState(failed(err.message, owner));
-    }
-  }
-
-  /** Asks what became of a secret that the server just refused to open. */
-  async function explainGone(identity: ShareIdentity) {
-    const encoded = identity.baseKeySet.getEncoded();
-    const owner = Boolean(identity.deletionToken);
-    try {
-      await getSecretMetadata(encoded.publicID, encoded.metadataToken);
-      setState({ stage: "error", ...notFound(owner) });
-    } catch (err) {
-      const gone = secretGoneFromError(err);
-      setState(gone ? { stage: "gone", gone, owner } : { stage: "error", ...notFound(owner) });
     }
   }
 
@@ -494,8 +475,6 @@ export default function RetrievePage() {
       return <RetrieveError title={state.title} message={state.message} owner={state.owner} />;
     case "deleted":
       return <ShareDeleted />;
-    case "gone":
-      return <ShareGone gone={state.gone} owner={state.owner} />;
     case "confirm":
       return (
         <ShareDetails

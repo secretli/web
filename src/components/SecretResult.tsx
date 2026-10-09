@@ -181,8 +181,11 @@ export default function SecretResult({
         {ownerOpen && (
           <div className="space-y-3.5 motion-safe:animate-drop">
             <p className="-mt-2 max-w-[36em] text-pretty text-sm text-muted">
-              See whether it was opened, or delete it before anyone does. Keep this link to
-              yourself: it opens the secret, too.
+              {/* Once a one-time secret is opened, nothing about it is left to show. */}
+              {burnAfterRead
+                ? "Delete it before anyone opens it."
+                : "See whether anyone has opened it, or delete it for everyone."}{" "}
+              Keep this link to yourself: it opens the secret, too.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <code
