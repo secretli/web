@@ -16,7 +16,6 @@ import {
   retrieveSecretRange,
   retryDelayMs,
   type StartUploadSessionParams,
-  secretGoneFromError,
   startRetrievalSession,
   startUploadSession,
   uploadSessionPart,
@@ -419,56 +418,3 @@ function expectHeader(init: RequestInit | undefined, name: string, value?: strin
   }
   expect(headers.get(name)).toBe(value);
 }
-
-describe("secretGoneFromError", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  function gone(details?: Record<string, unknown>) {
-    return new ApiError(410, "secret is gone", undefined, undefined, details);
-  }
-
-  it("reads what became of a secret out of a 410", () => {
-    expect(secretGoneFromError(gone({ outcome: "opened", burn_after_read: true }))).toStrictEqual({
-      outcome: "opened",
-      burn_after_read: true,
-    });
-    expect(secretGoneFromError(gone({ outcome: "deleted", burn_after_read: false }))).toStrictEqual(
-      { outcome: "deleted", burn_after_read: false },
-    );
-  });
-
-  it("does not need burn_after_read", () => {
-    expect(secretGoneFromError(gone({ outcome: "deleted" }))).toStrictEqual({
-      outcome: "deleted",
-      burn_after_read: false,
-    });
-  });
-
-  it("reads nothing out of anything but a 410 with a known outcome", () => {
-    expect(secretGoneFromError(gone({ outcome: "vanished", burn_after_read: true }))).toBeNull();
-    // An expired secret answers 404, not a 410 with a reason.
-    expect(secretGoneFromError(gone({ outcome: "expired", burn_after_read: true }))).toBeNull();
-    expect(secretGoneFromError(gone({ burn_after_read: true }))).toBeNull();
-    expect(secretGoneFromError(gone())).toBeNull();
-    expect(secretGoneFromError(new ApiError(404, "not found"))).toBeNull();
-    expect(secretGoneFromError(new Error("boom"))).toBeNull();
-  });
-
-  it("finds the details on the error the metadata request fails with", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          error: "secret is gone",
-          details: { outcome: "deleted", burn_after_read: false },
-        }),
-        { status: 410 },
-      ),
-    );
-
-    const err = await getSecretMetadata("pub-id", "meta-token").catch((e) => e);
-
-    expect(secretGoneFromError(err)).toStrictEqual({ outcome: "deleted", burn_after_read: false });
-  });
-});

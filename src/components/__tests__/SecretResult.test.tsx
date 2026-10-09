@@ -132,6 +132,24 @@ describe("SecretResult", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(OWNER_URL));
   });
 
+  // Once a one-time secret is opened, nothing about it is left to show: only
+  // a reusable secret's owner link can say whether it was opened.
+  it.each([
+    [
+      false,
+      "See whether anyone has opened it, or delete it for everyone. Keep this link to yourself: it opens the secret, too.",
+    ],
+    [
+      true,
+      "Delete it before anyone opens it. Keep this link to yourself: it opens the secret, too.",
+    ],
+  ])("says what the owner link can do (one-time: %s)", (burnAfterRead, explanation) => {
+    renderResult({ burnAfterRead });
+    openOwnerLink();
+
+    expect(screen.getByText(explanation)).toBeTruthy();
+  });
+
   it("asks before deleting the secret, then deletes it", () => {
     const onDelete = vi.fn();
     renderResult({ onDelete });

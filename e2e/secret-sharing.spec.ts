@@ -43,21 +43,26 @@ test.describe("Text secret sharing", () => {
     const decryptedText = await page.locator("pre").textContent();
     expect(decryptedText).toBe(secretText);
 
-    // The owner link now says what happened, and so does the link itself.
+    // The secret is gone now, and both links say only that: the server keeps
+    // nothing about it, not even that it was opened.
     const ownerPage = await context.newPage();
     await ownerPage.goto(ownerUrl);
-    await expect(ownerPage.locator("h1")).toHaveText("Your secret was opened", { timeout: 10000 });
+    await expect(ownerPage.locator("h1")).toHaveText("This secret is gone", { timeout: 10000 });
     await expect(
-      ownerPage.getByText("It was a one-time secret, so nothing is left on the server."),
+      ownerPage.getByText(
+        "It may have expired, been opened or been deleted. Nothing is left on the server.",
+      ),
     ).toBeVisible();
+    await expect(ownerPage.getByRole("link", { name: "← Share another secret" })).toBeVisible();
     await expectAccessible(ownerPage);
 
     const latePage = await context.newPage();
     await latePage.goto(shareUrl);
-    await expect(latePage.locator("h1")).toHaveText("This secret was already opened", {
-      timeout: 10000,
-    });
-    await expect(latePage.getByText(/tell the sender/)).toBeVisible();
+    await expect(latePage.locator("h1")).toHaveText("This secret is gone", { timeout: 10000 });
+    await expect(latePage.getByText(/ask the sender for a new link/)).toBeVisible();
+    await expect(
+      latePage.getByRole("link", { name: "← Share a secret of your own" }),
+    ).toBeVisible();
     await expectAccessible(latePage);
   });
 
@@ -138,22 +143,24 @@ test.describe("Text secret sharing", () => {
       timeout: 10000,
     });
 
-    // Coming back to the owner link later still says so.
+    // Coming back to the owner link later finds it gone, as the link itself does.
     await page.goto(ownerUrl);
-    await expect(page.locator("h1")).toHaveText("Secret deleted", { timeout: 10000 });
+    await expect(page.locator("h1")).toHaveText("This secret is gone", { timeout: 10000 });
     await expect(
-      page.getByText("You deleted it. The link doesn't open anything any more."),
+      page.getByText(
+        "It may have expired, been opened or been deleted. Nothing is left on the server.",
+      ),
     ).toBeVisible();
     await expectAccessible(page);
 
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.locator("h1")).toHaveText("This secret was deleted", {
+    await expect(recipientPage.locator("h1")).toHaveText("This secret is gone", {
       timeout: 10000,
     });
     await expect(
       recipientPage.getByText(
-        "The sender deleted it. Ask the sender for a new link if you still need it.",
+        "It may have expired, been opened or been deleted. Nothing is left on the server, so ask the sender for a new link if you still need it.",
       ),
     ).toBeVisible();
   });

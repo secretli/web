@@ -241,9 +241,7 @@ test.describe("File bundle sharing", () => {
 
     const secondPage = await context.newPage();
     await secondPage.goto(shareUrl);
-    await expect(
-      secondPage.getByText(/^Someone opened it, and a one-time secret opens only once\./),
-    ).toBeVisible({ timeout: 10000 });
+    await expect(secondPage.locator("h1")).toHaveText("This secret is gone", { timeout: 10000 });
   });
 
   test("owner link can delete a bundle before recipients retrieve it", async ({
@@ -269,7 +267,7 @@ test.describe("File bundle sharing", () => {
 
     const recipientPage = await context.newPage();
     await recipientPage.goto(shareUrl);
-    await expect(recipientPage.getByText(/^The sender deleted it\. /)).toBeVisible({
+    await expect(recipientPage.locator("h1")).toHaveText("This secret is gone", {
       timeout: 10000,
     });
   });
