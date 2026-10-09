@@ -4,7 +4,9 @@ import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 
-const DEFAULT_SIZE_MIB = 1023;
+// Near 1 GiB a bundle is padded in steps of 16 MiB, so 1,007 MiB is the most
+// that fits under the limit.
+const DEFAULT_SIZE_MIB = 1000;
 const TEST_TIMEOUT_MS = 10 * 60 * 1000;
 const MIB = 1024 * 1024;
 
@@ -119,7 +121,7 @@ async function retrieveBundle(
   await page.getByRole("button", { name: "Show the files" }).click();
   await expect(page.locator("h1")).toHaveText("Here's your file", { timeout: TEST_TIMEOUT_MS });
   const revealMs = performance.now() - revealStartedAt;
-  await sampleHeap("after manifest");
+  await sampleHeap("after opening");
 
   const downloadStartedAt = performance.now();
   const downloadPromise = page.waitForEvent("download", { timeout: TEST_TIMEOUT_MS });

@@ -1,25 +1,43 @@
 import {
-  fitsBundleManifestLimit,
-  fitsBundleUploadLimit,
+  bundleLimitError,
+  isFileListTooLarge,
   MAX_ENCRYPTED_UPLOAD_BYTES,
+  TOO_LARGE_MESSAGE,
+  TOO_MANY_FILES_MESSAGE,
 } from "../uploadLimits";
 
+const MIB = 1024 * 1024;
+
 describe("upload limits", () => {
-  it("accepts a bundle that fits after encryption", () => {
-    expect(fitsBundleUploadLimit([1024])).toBe(true);
+  it("accepts files that fit once bundled and encrypted", () => {
+    expect(bundleLimitError([])).toBeNull();
+    expect(bundleLimitError([{ name: "notes.txt", size: 1024 }])).toBeNull();
   });
 
-  it("reserves bundle chunk and manifest overhead", () => {
-    // A file of exactly the limit cannot fit once records, manifest and footer
-    // are added around it.
-    expect(fitsBundleUploadLimit([MAX_ENCRYPTED_UPLOAD_BYTES])).toBe(false);
+  it("counts the padding and the chunks' tags against the limit", () => {
+    // Near 1 GiB the stream is padded in steps of 16 MiB, so 1,007 MiB of
+    // content is the most that fits, though 1,008 MiB is still under 1 GiB.
+    expect(bundleLimitError([{ name: "big.bin", size: 1007 * MIB }])).toBeNull();
+    expect(bundleLimitError([{ name: "big.bin", size: 1008 * MIB }])).toBe(TOO_LARGE_MESSAGE);
+    expect(bundleLimitError([{ name: "big.bin", size: MAX_ENCRYPTED_UPLOAD_BYTES }])).toBe(
+      TOO_LARGE_MESSAGE,
+    );
   });
 
-  it("detects file counts whose manifest overflows the cap", () => {
-    const few = Array.from({ length: 3 }, (_, i) => new File(["x"], `f-${i}.bin`));
-    const many = Array.from({ length: 3000 }, (_, i) => new File(["x"], `f-${i}.bin`));
-    expect(fitsBundleManifestLimit([])).toBe(true);
-    expect(fitsBundleManifestLimit(few)).toBe(true);
-    expect(fitsBundleManifestLimit(many)).toBe(false);
+  it("finds files whose names overflow the file list", () => {
+    const few = Array.from({ length: 3 }, (_, i) => ({ name: `f-${i}.bin`, size: 1 }));
+    // 2,000 names of 2 KiB come to more than the list's 4 MiB.
+    const many = Array.from({ length: 2000 }, (_, i) => ({
+      name: `${i}-${"x".repeat(2048)}.bin`,
+      size: 1,
+    }));
+    expect(bundleLimitError(few)).toBeNull();
+    expect(bundleLimitError(many)).toBe(TOO_MANY_FILES_MESSAGE);
+  });
+
+  it("knows the error a list that is too large is thrown as", () => {
+    expect(isFileListTooLarge(new Error("bundle file list is too large"))).toBe(true);
+    expect(isFileListTooLarge(new Error("invalid bundle file size"))).toBe(false);
+    expect(isFileListTooLarge("bundle file list is too large")).toBe(false);
   });
 });

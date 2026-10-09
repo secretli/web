@@ -12,14 +12,10 @@ import { ApiError, deleteSecret } from "../lib/api";
 import { formatSize } from "../lib/format";
 import { UploadCancelledError, uploadMultipartBundle } from "../lib/multipartBundleUpload";
 import { takeSharedText } from "../lib/shareTarget";
-import {
-  fitsBundleManifestLimit,
-  fitsBundleUploadLimit,
-  MAX_UPLOAD_LABEL,
-} from "../lib/uploadLimits";
+import { bundleLimitError, isFileListTooLarge, TOO_MANY_FILES_MESSAGE } from "../lib/uploadLimits";
 
 // Text is stored as a single-file bundle so there is exactly one on-the-wire
-// format; the name is inside the encrypted manifest and never reaches the server.
+// format; the name is inside the encrypted bundle and never reaches the server.
 const TEXT_SECRET_FILENAME = "secret.txt";
 
 interface ShareResult {
@@ -63,12 +59,9 @@ export default function SharePage() {
               type: "text/plain",
             }),
           ];
-    if (!fitsBundleUploadLimit(files.map((file) => file.size))) {
-      toast.error(`Together these files exceed the ${MAX_UPLOAD_LABEL} limit.`);
-      return;
-    }
-    if (!fitsBundleManifestLimit(files)) {
-      toast.error("Too many files for one link. Zip them first, or split them up.");
+    const limitError = bundleLimitError(files);
+    if (limitError) {
+      toast.error(limitError);
       return;
     }
 
@@ -86,7 +79,7 @@ export default function SharePage() {
         encryptKeySet = await KeySet.fromShareSecret(encoded.shareSecret, data.password);
       }
 
-      // Text and files are encrypted record by record and streamed as multipart
+      // Text and files are encrypted chunk by chunk and streamed as multipart
       // parts alike, so there is a single upload path. Only a real upload is
       // worth a cancel button; a text is gone before anyone could press it.
       const cancellable = data.kind === "files";
@@ -128,8 +121,8 @@ export default function SharePage() {
         toast.info("Upload cancelled.");
       } else if (err instanceof ApiError) {
         toast.error(err.message);
-      } else if (err instanceof Error && err.message === "bundle manifest is too large") {
-        toast.error("Too many files for one link. Zip them first, or split them up.");
+      } else if (isFileListTooLarge(err)) {
+        toast.error(TOO_MANY_FILES_MESSAGE);
       } else {
         toast.error("An unexpected error occurred. Please try again.");
       }

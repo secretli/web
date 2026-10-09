@@ -60,10 +60,12 @@ export default function HowItWorksPage() {
 
       <Section title="What the server stores">
         <p>
-          Ciphertext, encrypted in your browser with XChaCha20-Poly1305, in records of 4 MiB that
-          are bound to their position so nothing can be reordered or dropped. The file names and
-          sizes sit inside an encrypted manifest. Next to it: the total size, the expiry, whether
-          the link opens once, and hashes of the tokens.
+          Ciphertext, encrypted in your browser with XChaCha20-Poly1305. The file names and sizes
+          come first, then the files, all in one stream sealed in chunks of 64 KiB that are bound to
+          their position, so nothing can be reordered, dropped or cut off. Zeros pad the stream to
+          at least 4 KiB, and beyond that by a few percent, so its size says little about what is
+          inside. Next to it: the total size, the expiry, whether the link opens once, and hashes of
+          the tokens.
         </p>
         <p>
           When a one-time secret is opened, or a secret is deleted, the server keeps a note of which

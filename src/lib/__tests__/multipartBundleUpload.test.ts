@@ -1,10 +1,6 @@
-import { KeySet, readBundleManifest } from "@secretli/format";
+import { KeySet, openBundle, plannedBundleSize } from "@secretli/format";
 import { ApiError, type StartUploadSessionResponse, type UploadSessionPart } from "../api";
-import {
-  S3_MIN_MULTIPART_PART_SIZE,
-  UploadCancelledError,
-  uploadMultipartBundle,
-} from "../multipartBundleUpload";
+import { UploadCancelledError, uploadMultipartBundle } from "../multipartBundleUpload";
 
 const api = vi.hoisted(() => ({
   startUploadSession: vi.fn(),
@@ -23,6 +19,12 @@ vi.mock("../api", async (importOriginal) => {
 const MIB = 1024 * 1024;
 // Small part size so a 13 MiB file yields more than one part in tests.
 const TEST_PART_SIZE = 6 * MIB;
+
+/** Reads an assembled object as a bundle. */
+function openAssembled(blob: Uint8Array, keySet: KeySet) {
+  const fetchRange = async (start: number, end: number) => blob.slice(start, end + 1);
+  return openBundle(fetchRange, keySet, blob.length);
+}
 
 interface FakeServer {
   status: StartUploadSessionResponse;
@@ -132,7 +134,7 @@ describe("uploadMultipartBundle", () => {
     for (const fn of Object.values(api)) fn.mockReset();
   });
 
-  it("splits the encrypted bundle into contiguous parts that respect the S3 minimum", async () => {
+  it("cuts the encrypted bundle into parts of exactly the part size, the last one shorter", async () => {
     const server = installFakeServer();
     const file = patternedFile(13 * MIB);
     const params = await baseParams([file]);
@@ -146,20 +148,34 @@ describe("uploadMultipartBundle", () => {
     expect(api.startUploadSession).toHaveBeenCalledTimes(1);
     expect(api.completeUploadSession).toHaveBeenCalledTimes(1);
     expect(api.abortUploadSession).not.toHaveBeenCalled();
-    const parts = Array.from(server.parts.values()).map((entry) => entry.part);
-    expect(parts.length).toBeGreaterThan(1);
-    for (const part of parts.slice(0, -1)) {
-      expect(part.size).toBeGreaterThanOrEqual(S3_MIN_MULTIPART_PART_SIZE);
+    // Fixed offsets: part n starts at (n - 1) * part_size, wherever chunks end.
+    const parts = Array.from(server.parts.values())
+      .map((entry) => entry.part)
+      .sort((a, b) => a.part_number - b.part_number);
+    expect(parts.map((part) => part.part_number)).toEqual([1, 2, 3]);
+    for (const [i, part] of parts.entries()) {
+      expect(part.offset).toBe(i * TEST_PART_SIZE);
     }
+    for (const part of parts.slice(0, -1)) {
+      expect(part.size).toBe(TEST_PART_SIZE);
+    }
+    expect(parts.at(-1)?.size).toBeGreaterThan(0);
+    expect(parts.at(-1)?.size).toBeLessThan(TEST_PART_SIZE);
+
+    // The declared size is the planned one, padding included.
     const blob = assembledBlob(server);
+    expect(server.status.blob_size).toBe(plannedBundleSize([file]));
     expect(blob.length).toBe(server.status.blob_size);
     expect(progress.at(-1)).toBe(blob.length);
 
-    // The assembled object is a valid bundle that decrypts with the bundle key.
-    const fetchRange = async (start: number, end: number) => blob.slice(start, end + 1);
-    const { manifest } = await readBundleManifest(fetchRange, params.bundleKeySet, blob.length);
-    expect(manifest.files[0].name).toBe("payload.bin");
-    expect(manifest.files[0].size).toBe(13 * MIB);
+    // The assembled object is a version 3 bundle that decrypts with the bundle key.
+    const bundle = await openAssembled(blob, params.bundleKeySet);
+    expect(bundle.version).toBe(3);
+    expect(bundle.files).toEqual([
+      { index: 0, name: "payload.bin", type: "application/octet-stream", size: 13 * MIB },
+    ]);
+    const decrypted = new Uint8Array(await (await bundle.decryptFile(0)).arrayBuffer());
+    expect(sameBytes(decrypted, new Uint8Array(await file.arrayBuffer()))).toBe(true);
     expect(result.encoded.shareSecret).toBe(params.baseKeySet.getEncoded().shareSecret);
     expect(result.deletionToken).toBe(params.baseKeySet.getEncoded().deletionToken);
   }, 30_000);
@@ -173,11 +189,24 @@ describe("uploadMultipartBundle", () => {
     expect(server.parts.size).toBe(1);
     const blob = assembledBlob(server);
     expect(blob.length).toBe(server.status.blob_size);
-    const fetchRange = async (start: number, end: number) => blob.slice(start, end + 1);
-    const { manifest } = await readBundleManifest(fetchRange, params.bundleKeySet, blob.length);
-    expect(manifest.files[0].name).toBe("tiny.bin");
+    const bundle = await openAssembled(blob, params.bundleKeySet);
+    expect(bundle.version).toBe(3);
+    expect(bundle.files.map((file) => file.name)).toEqual(["tiny.bin"]);
     // The password-derived key is what protects the blob, not the base key.
-    await expect(readBundleManifest(fetchRange, params.baseKeySet, blob.length)).rejects.toThrow();
+    await expect(openAssembled(blob, params.baseKeySet)).rejects.toThrow();
+  });
+
+  it("keeps the files' names out of the envelope", async () => {
+    installFakeServer();
+    const params = await baseParams([patternedFile(64, "names-stay-inside.bin")]);
+
+    await uploadMultipartBundle(params);
+
+    const [{ encrypted_meta }] = api.startUploadSession.mock.calls[0];
+    expect(await params.baseKeySet.decryptMeta(encrypted_meta)).toEqual({
+      type: "bundle",
+      password_protected: false,
+    });
   });
 
   it("retries transient part failures but not client errors", async () => {
@@ -359,9 +388,8 @@ describe("uploadMultipartBundle", () => {
     expect(first.length).toBe(second.length);
     expect(sameBytes(first, second)).toBe(false);
     for (const blob of [first, second]) {
-      const fetchRange = async (start: number, end: number) => blob.slice(start, end + 1);
-      const { manifest } = await readBundleManifest(fetchRange, keys.bundleKeySet, blob.length);
-      expect(manifest.files[0].size).toBe(64);
+      const bundle = await openAssembled(blob, keys.bundleKeySet);
+      expect(bundle.files[0].size).toBe(64);
     }
   });
 });

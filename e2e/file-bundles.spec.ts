@@ -59,6 +59,31 @@ async function revealBundle(page: Page, shareUrl: string, password?: string) {
   await page.getByRole("button", { name: "Show the files" }).click();
 }
 
+/** Downloads one file of several with the button next to it, and checks what arrives. */
+async function downloadOneFile(
+  page: Page,
+  file: TestFile,
+  outputPath: (filename: string) => string,
+) {
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 10000 }),
+    page.getByRole("button", { name: `Download ${file.name}`, exact: true }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe(file.name);
+  const path = outputPath(file.name);
+  await download.saveAs(path);
+  await expect(readFile(path, "utf8")).resolves.toBe(file.contents);
+}
+
+/** Whether leaving the page now would ask first. */
+function leavingAsks(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+}
+
 async function downloadBundleFiles(
   page: Page,
   files: TestFile[],
@@ -112,6 +137,80 @@ test.describe("File bundle sharing", () => {
     await expect(page.getByText("all-bravo.txt")).toBeVisible();
 
     await downloadBundleFiles(page, files, (filename) => testInfo.outputPath(filename));
+  });
+
+  test("downloads one file out of several, and the others stay", async ({ page }, testInfo) => {
+    const files = [
+      { name: "pick-alpha.txt", mimeType: "text/plain", contents: "pick alpha" },
+      { name: "pick-bravo.txt", mimeType: "text/plain", contents: "pick bravo" },
+      { name: "pick-charlie.txt", mimeType: "text/plain", contents: "pick charlie" },
+    ];
+    const outputPath = (filename: string) => testInfo.outputPath(filename);
+
+    const shareUrl = await createFileSecret(page, files);
+    await revealBundle(page, shareUrl);
+    await expect(page.locator("h1")).toHaveText("Here are your files", { timeout: 10000 });
+
+    await downloadOneFile(page, files[1], outputPath);
+
+    // The others stay listed, and can still be downloaded on their own.
+    await expect(
+      page.getByRole("button", { name: "Save pick-bravo.txt again", exact: true }),
+    ).toBeEnabled();
+    for (const file of [files[0], files[2]]) {
+      await expect(page.getByTestId(`bundle-file-${files.indexOf(file)}`)).toContainText(file.name);
+      await expect(
+        page.getByRole("button", { name: `Download ${file.name}`, exact: true }),
+      ).toBeEnabled();
+    }
+    await expect(page.getByRole("button", { name: "Download the rest" })).toBeEnabled();
+    await expectAccessible(page);
+
+    await downloadOneFile(page, files[2], outputPath);
+  });
+
+  test("a one-time bundle asks before leaving until every file is saved", async ({
+    page,
+  }, testInfo) => {
+    const files = [
+      { name: "keep-alpha.txt", mimeType: "text/plain", contents: "keep alpha" },
+      { name: "keep-bravo.txt", mimeType: "text/plain", contents: "keep bravo" },
+    ];
+    const outputPath = (filename: string) => testInfo.outputPath(filename);
+
+    const shareUrl = await createFileSecret(page, files);
+    await revealBundle(page, shareUrl);
+    await expect(page.locator("h1")).toHaveText("Here are your files", { timeout: 10000 });
+    await expect(
+      page.getByText(/^One-time: files you don't save in the next \d+:\d\d are gone for good\.$/),
+    ).toBeVisible();
+
+    await downloadOneFile(page, files[0], outputPath);
+
+    // One file is still only here: leaving asks first, also through the
+    // app's own links. The dialog blocks the click until it is answered.
+    expect(await leavingAsks(page)).toBe(true);
+    const [leaving] = await Promise.all([
+      page.waitForEvent("dialog").then(async (dialog) => {
+        await dialog.dismiss();
+        return dialog;
+      }),
+      page.getByRole("link", { name: "Share", exact: true }).click(),
+    ]);
+    expect(leaving.type()).toBe("beforeunload");
+    await expect(page.locator("h1")).toHaveText("Here are your files");
+
+    await downloadOneFile(page, files[1], outputPath);
+
+    // Every file is saved: the page lets go.
+    await expect(
+      page.getByText(
+        "Saved. If your browser blocked one of them, use the button next to that file.",
+      ),
+    ).toBeVisible();
+    expect(await leavingAsks(page)).toBe(false);
+    await page.getByRole("link", { name: "Share", exact: true }).click();
+    await expect(page.locator("h1")).toHaveText("Share a secret");
   });
 
   test("requires password before listing a protected bundle", async ({ page }, testInfo) => {

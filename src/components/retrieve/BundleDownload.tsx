@@ -1,15 +1,15 @@
-import { type BundleManifest, type DecryptedBundleFile, manifestTotalSize } from "@secretli/format";
+import type { BundleEntry } from "@secretli/format";
 import { useEffect, useState } from "react";
 import { useLeaveWarning } from "../../hooks/useLeaveWarning";
-import { saveBlob } from "../../lib/download";
 import { formatSize } from "../../lib/format";
+import Spinner from "../Spinner";
 import Button from "../ui/Button";
-import { ArrowRightIcon, DownloadIcon, FileIcon } from "../ui/icons";
+import IconButton from "../ui/IconButton";
+import { ArrowRightIcon, CheckIcon, DownloadIcon, FileIcon } from "../ui/icons";
 import Note from "../ui/Note";
 import PageTitle from "../ui/PageTitle";
 import ProgressRow from "../ui/ProgressRow";
 import { textButtonClass } from "../ui/styles";
-import TextButton from "../ui/TextButton";
 import DeleteShareButton from "./DeleteShareButton";
 
 /** 0..1 of the files decrypted so far, with a label like "4.0 MB / 10.0 MB". */
@@ -17,6 +17,9 @@ export interface DownloadProgress {
   fraction: number;
   label: string;
 }
+
+/** What is being downloaded: every file not saved yet, or the one at index. */
+export type Downloading = { kind: "all" } | { kind: "file"; index: number };
 
 function secondsUntil(iso: string): number {
   return Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 1000));
@@ -39,101 +42,132 @@ function formatCountdown(seconds: number): string {
 }
 
 interface BundleDownloadProps {
-  manifest: BundleManifest;
+  files: readonly BundleEntry[];
+  totalSize: number;
   sessionExpiresAt: string;
   burnAfterRead: boolean;
-  downloading: boolean;
+  downloading: Downloading | null;
   progress: DownloadProgress | null;
-  downloadedFiles: DecryptedBundleFile[] | null;
+  /** The files decrypted so far, by index: saving them again fetches nothing. */
+  decryptedFiles: ReadonlyMap<number, Blob>;
+  /** The files handed to the browser at least once, by index. */
+  savedFiles: ReadonlySet<number>;
   canDelete: boolean;
   deleting: boolean;
   onDownloadAll: () => void;
+  onDownloadFile: (index: number) => void;
   onDelete: () => void;
 }
 
-/** The file list and download controls once the manifest has been read. */
+/** The file list and download controls once the bundle has been opened. */
 export default function BundleDownload({
-  manifest,
+  files,
+  totalSize,
   sessionExpiresAt,
   burnAfterRead,
   downloading,
   progress,
-  downloadedFiles,
+  decryptedFiles,
+  savedFiles,
   canDelete,
   deleting,
   onDownloadAll,
+  onDownloadFile,
   onDelete,
 }: BundleDownloadProps) {
-  const isMulti = manifest.files.length > 1;
-  const totalSize = manifestTotalSize(manifest);
+  const isMulti = files.length > 1;
   const secondsLeft = useSecondsUntil(sessionExpiresAt);
-  // Once the blobs are in memory the server session no longer matters.
-  const expired = secondsLeft === 0 && !downloadedFiles;
-  const canDownload = !downloading && !expired;
-  // A one-time share is gone from the server: until the files are saved,
-  // this page holds the only way to get them.
-  const onlyCopyHere = burnAfterRead && !downloadedFiles && !expired;
+  const windowClosed = secondsLeft === 0;
+  const someSaved = files.some((file) => savedFiles.has(file.index));
+  const allSaved = files.every((file) => savedFiles.has(file.index));
+  // Once a file is in memory the server session no longer matters for it.
+  const allDecrypted = files.every((file) => decryptedFiles.has(file.index));
+  const expired = windowClosed && !allDecrypted;
+  const canGet = (file: BundleEntry) =>
+    downloading === null && (decryptedFiles.has(file.index) || !windowClosed);
+  // A one-time share is gone from the server: until every file is saved,
+  // this page holds the only way to get the rest.
+  const onlyCopyHere =
+    burnAfterRead &&
+    files.some(
+      (file) => !savedFiles.has(file.index) && (decryptedFiles.has(file.index) || !windowClosed),
+    );
   useLeaveWarning(onlyCopyHere);
 
-  const note = downloadedFiles
+  const countdown = formatCountdown(secondsLeft);
+  const note = allSaved
     ? isMulti
-      ? "Saved. If your browser blocked one of them, use Save next to that file."
+      ? "Saved. If your browser blocked one of them, use the button next to that file."
       : "Saved. Use Save to save it again."
     : expired
       ? burnAfterRead
         ? "The download window closed. This one-time secret can't be opened again."
         : "The download window closed. Open the link again to start a new one."
-      : `${formatCountdown(secondsLeft)} left to download${
-          burnAfterRead ? ", and it opens only once: stay on this page until it's done." : "."
-        }`;
+      : burnAfterRead
+        ? isMulti
+          ? `One-time: files you don't save in the next ${countdown} are gone for good.`
+          : `One-time: if you don't save it in the next ${countdown}, it's gone for good.`
+        : `${countdown} left to download.`;
 
   return (
     <div className="space-y-7">
-      <PageTitle
-        lead={`${manifest.files.length} ${isMulti ? "files" : "file"} · ${formatSize(totalSize)}`}
-      >
+      <PageTitle lead={`${files.length} ${isMulti ? "files" : "file"} · ${formatSize(totalSize)}`}>
         {isMulti ? "Here are your files" : "Here's your file"}
       </PageTitle>
 
       <div className="overflow-hidden rounded-[20px] border border-line bg-surface shadow-card">
         <ul className="m-0 list-none px-2.5 pt-2.5 pb-1.5">
-          {manifest.files.map((file) => {
-            const downloaded = downloadedFiles?.find((entry) => entry.file.index === file.index);
+          {files.map((file) => {
+            const saved = savedFiles.has(file.index);
             return (
               <li
-                key={`${file.index}-${file.path}`}
+                key={file.index}
                 data-testid={`bundle-file-${file.index}`}
-                className="flex min-h-13 items-center gap-3 pr-2 pl-3.5"
+                className={`flex min-h-13 items-center gap-3 pl-3.5 ${isMulti ? "pr-0.5" : "pr-2"}`}
               >
-                <span className="flex text-faint">
-                  <FileIcon />
+                <span className={`flex ${saved ? "text-ink" : "text-faint"}`}>
+                  {saved ? <CheckIcon /> : <FileIcon />}
                 </span>
                 <span
                   className="min-w-0 flex-1 truncate font-mono text-sm text-ink"
-                  title={file.path}
+                  title={file.name}
                 >
-                  {file.path}
+                  {file.name}
                 </span>
                 <span className="text-[13px] tabular-nums text-faint">{formatSize(file.size)}</span>
-                {downloaded && (
-                  <TextButton onClick={() => saveBlob(downloaded.blob, downloaded.file.name)}>
-                    Save
-                  </TextButton>
+                {isMulti && (
+                  <IconButton
+                    label={saved ? `Save ${file.name} again` : `Download ${file.name}`}
+                    disabled={!canGet(file)}
+                    onClick={() => onDownloadFile(file.index)}
+                  >
+                    {downloading?.kind === "file" && downloading.index === file.index ? (
+                      <Spinner size="sm" />
+                    ) : (
+                      <DownloadIcon />
+                    )}
+                  </IconButton>
                 )}
               </li>
             );
           })}
         </ul>
         <div className="flex flex-wrap items-center gap-0.5 border-t border-line p-2">
-          <Button onClick={onDownloadAll} disabled={!canDownload} className="pl-4">
+          <Button
+            onClick={onDownloadAll}
+            disabled={downloading !== null || expired}
+            className="pl-4"
+          >
             <DownloadIcon />
-            {downloading
+            {downloading?.kind === "all"
               ? "Preparing…"
-              : downloadedFiles
+              : allSaved
                 ? "Save again"
-                : isMulti
-                  ? "Download files"
-                  : "Download file"}
+                : !isMulti
+                  ? "Download file"
+                  : someSaved
+                    ? "Download the rest"
+                    : "Download files"}
           </Button>
         </div>
         {downloading && (

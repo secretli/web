@@ -1,15 +1,5 @@
-import type { EncodedKeySet, KeySet } from "@secretli/format";
-import {
-  BUNDLE_FOOTER_LENGTH,
-  type BundleManifest,
-  type BundlePlan,
-  buildBundleFooter,
-  bundleManifestAad,
-  bundleNameForFiles,
-  bundleRecordAad,
-  planBundle,
-  sha256Hex,
-} from "@secretli/format";
+import type { EncodedKeySet, KeySet, StreamPlan } from "@secretli/format";
+import { cutIntoParts, encryptStream, planStream, sha256Hex } from "@secretli/format";
 import {
   ApiError,
   abortUploadSession,
@@ -23,9 +13,7 @@ import {
   uploadSessionPart,
 } from "./api";
 
-export const MULTIPART_UPLOAD_PART_SIZE = 32 * 1024 * 1024;
 export const MULTIPART_UPLOAD_CONCURRENCY = 3;
-export const S3_MIN_MULTIPART_PART_SIZE = 5 * 1024 * 1024;
 
 export class UploadCancelledError extends Error {
   constructor() {
@@ -56,14 +44,14 @@ export interface MultipartUploadProgress {
 
 export interface MultipartBundleUploadResult {
   readonly expires_at: string;
-  readonly manifest: BundleManifest;
   readonly encoded: EncodedKeySet;
   readonly deletionToken: string;
 }
 
 /**
- * Encrypts the files record by record and streams them to the server as S3
- * multipart parts, so neither side ever holds the whole bundle in memory.
+ * Encrypts the files as one stream, chunk by chunk, and uploads it in parts
+ * of exactly the size the server asks for, so neither side ever holds the
+ * whole bundle in memory and the parts' sizes say nothing about the files.
  * A failed upload is simply started again with fresh keys; nothing about an
  * attempt is persisted.
  */
@@ -75,13 +63,13 @@ export async function uploadMultipartBundle(
   }
   throwIfCancelled(params.signal);
 
-  const bundleName = bundleNameForFiles(params.files);
-  const plan = planBundle(params.files, bundleName);
-  const session = await createUploadSession(params, plan.totalSize, bundleName);
+  // Planned from names and sizes alone: the exact size is known up front.
+  const plan = planStream(params.files);
+  const session = await createUploadSession(params, plan.totalSize);
   const encoded = params.baseKeySet.getEncoded();
 
   try {
-    const manifest = await encryptAndUploadParts(params, plan, session);
+    await encryptAndUploadParts(params, plan, session);
     throwIfCancelled(params.signal);
     // The server answers a repeated complete with the same result, so a
     // transient failure here must not throw the whole upload away.
@@ -91,7 +79,6 @@ export async function uploadMultipartBundle(
     );
     return {
       expires_at: response.expires_at,
-      manifest,
       encoded,
       deletionToken: encoded.deletionToken,
     };
@@ -107,12 +94,12 @@ export async function uploadMultipartBundle(
 
 async function encryptAndUploadParts(
   params: MultipartBundleUploadParams,
-  plan: BundlePlan,
+  plan: StreamPlan,
   session: StartUploadSessionResponse,
-): Promise<BundleManifest> {
+) {
   const uploader = new UploadQueue(MULTIPART_UPLOAD_CONCURRENCY, params.signal);
   try {
-    return await encryptAndQueueParts(params, plan, session, uploader);
+    await encryptAndQueueParts(params, plan, session, uploader);
   } finally {
     // After a failure (including one while encrypting), parts still in flight
     // are pointless; after success nothing is left running.
@@ -122,10 +109,10 @@ async function encryptAndUploadParts(
 
 async function encryptAndQueueParts(
   params: MultipartBundleUploadParams,
-  plan: BundlePlan,
+  plan: StreamPlan,
   session: StartUploadSessionResponse,
   uploader: UploadQueue,
-): Promise<BundleManifest> {
+) {
   let uploadedBytes = 0;
   let uploadedPartCount = 0;
 
@@ -138,34 +125,31 @@ async function encryptAndQueueParts(
   };
   reportProgress();
 
+  // Every part but the last is exactly part_size, cut wherever chunks begin
+  // and end: part n starts at (n - 1) * part_size.
+  const stream = encryptStream(plan, params.files, params.bundleKeySet);
   let partNumber = 1;
-  let currentOffset = 0;
-  let currentSize = 0;
-  let currentParts: ArrayBuffer[] = [];
+  let offset = 0;
+  for await (const bytes of cutIntoParts(stream, session.part_size)) {
+    throwIfCancelled(params.signal);
+    // Stop encrypting as soon as any part has failed for good.
+    uploader.throwIfFailed();
 
-  const flushPart = async (isFinal: boolean) => {
-    if (currentParts.length === 0) {
-      return;
-    }
-    if (!isFinal && currentSize < S3_MIN_MULTIPART_PART_SIZE) {
-      return;
-    }
-
-    const part = new Blob(currentParts, { type: "application/octet-stream" });
-    const offset = currentOffset;
     const number = partNumber;
-    const sha256 = await sha256Blob(part);
-    currentParts = [];
-    currentSize = 0;
+    const partOffset = offset;
+    const sha256 = await sha256Hex(bytes);
+    const part = new Blob([toArrayBuffer(bytes)], { type: "application/octet-stream" });
     partNumber++;
+    offset += bytes.length;
 
     throwIfCancelled(params.signal);
+    // Waits while the queue is full, so encryption never runs far ahead.
     await uploader.schedule(async (signal) => {
       const uploaded = await uploadPartWithRetry(
         session.session_id,
         session.upload_token,
         number,
-        offset,
+        partOffset,
         part,
         sha256,
         signal,
@@ -174,71 +158,23 @@ async function encryptAndQueueParts(
       uploadedPartCount++;
       reportProgress();
     });
-  };
-
-  for (const record of plan.records) {
-    throwIfCancelled(params.signal);
-    // Stop encrypting as soon as any part has failed for good.
-    uploader.throwIfFailed();
-    if (
-      currentParts.length > 0 &&
-      currentSize + record.length > session.part_size &&
-      currentSize >= S3_MIN_MULTIPART_PART_SIZE
-    ) {
-      await flushPart(false);
-      currentOffset = record.offset;
-    }
-
-    const file = params.files[record.fileIndex];
-    const plaintext = new Uint8Array(await file.slice(record.start, record.end).arrayBuffer());
-    if (plaintext.length !== record.plaintextSize) {
-      throw new Error("bundle file changed during encryption");
-    }
-    const encrypted = params.bundleKeySet.encryptBundlePart(
-      plaintext,
-      bundleRecordAad(record.fileIndex, record.chunkIndex, record.plaintextSize),
-    );
-    if (encrypted.length !== record.length) {
-      throw new Error("bundle record size mismatch");
-    }
-    currentParts.push(toArrayBuffer(encrypted));
-    currentSize += encrypted.length;
+  }
+  if (offset !== plan.totalSize) {
+    throw new Error("bundle size mismatch");
   }
 
-  // The manifest is fully known at plan time, so the declared blob size the
-  // server validated against still holds.
-  const manifest = plan.manifest;
-  const encryptedManifest = params.bundleKeySet.encryptBundlePart(
-    new TextEncoder().encode(JSON.stringify(manifest)),
-    bundleManifestAad(),
-  );
-  if (encryptedManifest.length !== plan.encryptedManifestLength) {
-    throw new Error("bundle manifest size mismatch");
-  }
-  const footer = buildBundleFooter({
-    version: 2,
-    footerLength: BUNDLE_FOOTER_LENGTH,
-    manifestLength: encryptedManifest.length,
-    manifestSha256: await sha256Hex(encryptedManifest),
-  });
-  currentParts.push(toArrayBuffer(encryptedManifest), toArrayBuffer(footer));
-  currentSize += encryptedManifest.length + footer.length;
-
-  await flushPart(true);
   await uploader.drain();
-  return manifest;
 }
 
 async function createUploadSession(
   params: MultipartBundleUploadParams,
   blobSize: number,
-  bundleName: string,
 ): Promise<StartUploadSessionResponse> {
   const encoded = params.baseKeySet.getEncoded();
+  // The files' names are only in the bundle; the envelope pads itself.
   const encryptedMeta = await params.baseKeySet.encryptMeta({
     type: params.secretType,
     password_protected: params.passwordProtected,
-    bundle_name: bundleName,
   });
   return startUploadSession({
     public_id: encoded.publicID,
@@ -366,10 +302,6 @@ function throwIfCancelled(signal?: AbortSignal) {
   if (signal?.aborted) {
     throw new UploadCancelledError();
   }
-}
-
-async function sha256Blob(blob: Blob): Promise<string> {
-  return sha256Hex(new Uint8Array(await blob.arrayBuffer()));
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

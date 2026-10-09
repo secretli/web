@@ -89,7 +89,11 @@ describe("Composer", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/exceed the 1 GiB limit/);
     expect(screen.getByLabelText("Secret")).toBeTruthy();
 
-    const many = Array.from({ length: 3000 }, (_, i) => new File(["x"], `many-${i}.bin`));
+    // 2,000 names of 2 KiB come to more than the file list's 4 MiB.
+    const many = Array.from(
+      { length: 2000 },
+      (_, i) => new File(["x"], `many-${i}-${"x".repeat(2048)}.bin`),
+    );
     fireEvent.change(fileInput(), { target: { files: many } });
 
     expect(screen.getByRole("alert").textContent).toMatch(/Too many files/);
