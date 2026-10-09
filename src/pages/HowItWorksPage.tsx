@@ -64,8 +64,8 @@ export default function HowItWorksPage() {
           come first, then the files, all in one stream sealed in chunks of 64 KiB that are bound to
           their position, so nothing can be reordered, dropped or cut off. Zeros pad the stream to
           at least 4 KiB, and beyond that by a few percent, so its size says little about what is
-          inside. Next to it: the total size, the expiry, whether the link opens once, and hashes of
-          the tokens.
+          inside. Next to it: the total size, when it was made and when it expires, both only to the
+          minute, whether the link opens once, and hashes of the tokens.
         </p>
         <p>
           A reusable secret also gets a mark of whether someone other than you has opened it, but

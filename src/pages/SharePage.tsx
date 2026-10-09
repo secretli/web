@@ -10,6 +10,7 @@ import { useLeaveWarning } from "../hooks/useLeaveWarning";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { ApiError, deleteSecret } from "../lib/api";
 import { formatSize } from "../lib/format";
+import { GONE_TITLE, goneMessage } from "../lib/gone";
 import { UploadCancelledError, uploadMultipartBundle } from "../lib/multipartBundleUpload";
 import { takeSharedText } from "../lib/shareTarget";
 import { bundleLimitError, isFileListTooLarge, TOO_MANY_FILES_MESSAGE } from "../lib/uploadLimits";
@@ -28,7 +29,11 @@ interface ShareResult {
   metadataToken: string;
 }
 
-type View = { kind: "compose" } | { kind: "result"; result: ShareResult } | { kind: "deleted" };
+type View =
+  | { kind: "compose" }
+  | { kind: "result"; result: ShareResult }
+  | { kind: "deleted" }
+  | { kind: "gone" };
 
 export default function SharePage() {
   const [view, setView] = useState<View>({ kind: "compose" });
@@ -44,7 +49,9 @@ export default function SharePage() {
       ? "Link ready"
       : view.kind === "deleted"
         ? "Secret deleted"
-        : "Share a secret",
+        : view.kind === "gone"
+          ? GONE_TITLE
+          : "Share a secret",
   );
 
   // A navigation away from an in-flight upload silently discards it.
@@ -139,6 +146,11 @@ export default function SharePage() {
       setView({ kind: "deleted" });
       toast.success("Secret deleted");
     } catch (err) {
+      // Gone already, opened or expired: there is nothing left to delete.
+      if (err instanceof ApiError && err.status === 404) {
+        setView({ kind: "gone" });
+        return;
+      }
       toast.error(err instanceof ApiError ? err.message : "Failed to delete the secret.");
     } finally {
       setDeleting(false);
@@ -169,6 +181,15 @@ export default function SharePage() {
           deleting={deleting}
           onDelete={() => handleDelete(view.result)}
         />
+        {startOverLink}
+      </div>
+    );
+  }
+
+  if (view.kind === "gone") {
+    return (
+      <div key="gone" className="space-y-8">
+        <PageTitle lead={goneMessage(true)}>{GONE_TITLE}</PageTitle>
         {startOverLink}
       </div>
     );
