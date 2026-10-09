@@ -1,5 +1,5 @@
 import {
-  type DecryptedEntry,
+  type BundleEntry,
   DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
   isShareFragment,
   KeySet,
@@ -9,7 +9,7 @@ import {
 } from "@secretli/format";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { DownloadProgress } from "../components/retrieve/BundleDownload";
+import type { Downloading, DownloadProgress } from "../components/retrieve/BundleDownload";
 import BundleDownload from "../components/retrieve/BundleDownload";
 import LinkPrompt from "../components/retrieve/LinkPrompt";
 import {
@@ -107,6 +107,15 @@ class RetrievalSessionExpiredError extends Error {
   }
 }
 
+/** How far decrypting has come, for the progress row. */
+function downloadProgress(decryptedBytes: number, totalBytes: number): DownloadProgress {
+  const done = Math.min(decryptedBytes, totalBytes);
+  return {
+    fraction: totalBytes > 0 ? done / totalBytes : 1,
+    label: `${formatSize(done)} / ${formatSize(totalBytes)}`,
+  };
+}
+
 /** Strips the share secret from the address bar so it does not linger in history. */
 function stripFragmentFromLocation() {
   if (!window.location.hash) return;
@@ -123,9 +132,11 @@ export default function RetrievePage() {
   usePageTitle("Open a secret");
   const [revealing, setRevealing] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [downloadingBundle, setDownloadingBundle] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
-  const [downloadedFiles, setDownloadedFiles] = useState<DecryptedEntry[] | null>(null);
+  const [downloading, setDownloading] = useState<Downloading | null>(null);
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  // Decrypted files stay in memory, so saving one again fetches nothing.
+  const [decryptedFiles, setDecryptedFiles] = useState<ReadonlyMap<number, Blob>>(new Map());
+  const [savedFiles, setSavedFiles] = useState<ReadonlySet<number>>(new Set());
   // Starting a retrieval session is what burns a burn-after-read share, so a
   // started session is kept and reused until the server stops accepting it. A
   // failure while reading must not throw away the only chance to read.
@@ -270,7 +281,8 @@ export default function RetrievePage() {
       return;
     }
 
-    setDownloadedFiles(null);
+    setDecryptedFiles(new Map());
+    setSavedFiles(new Set());
     setState({
       stage: "bundle-ready",
       identity,
@@ -385,47 +397,91 @@ export default function RetrievePage() {
     }
   }
 
+  /**
+   * Downloads every file not saved yet, all in one pass, and saves them one
+   * after another. Once every file was saved, saves them all again.
+   */
   async function downloadAll() {
     if (state.stage !== "bundle-ready") return;
     const { bundle } = state;
-    const { totalSize } = bundle;
+    const unsaved = bundle.files.filter((file) => !savedFiles.has(file.index));
+    const wanted = unsaved.length > 0 ? unsaved : bundle.files;
+    const missing = wanted.filter((file) => !decryptedFiles.has(file.index));
 
-    // Already decrypted once (for example a browser blocked some of the
-    // saves): just hand the blobs to the browser again.
-    if (downloadedFiles) {
-      await saveDecrypted(downloadedFiles);
+    // Already decrypted (for example a browser blocked some of the saves):
+    // just hand the blobs to the browser again.
+    if (missing.length === 0) {
+      await saveDecrypted(wanted, decryptedFiles);
       return;
     }
 
-    setDownloadingBundle(true);
-    setDownloadProgress({ fraction: 0, label: `0 B / ${formatSize(totalSize)}` });
+    const totalBytes = missing.reduce((sum, file) => sum + file.size, 0);
+    setDownloading({ kind: "all" });
+    setProgress(downloadProgress(0, totalBytes));
     try {
-      const files = await bundle.decryptFiles(undefined, {
-        maxCoalescedPlaintextBytes: DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
-        onProgress: ({ decryptedBytes }) => {
-          const done = Math.min(decryptedBytes, totalSize);
-          setDownloadProgress({
-            fraction: totalSize > 0 ? done / totalSize : 1,
-            label: `${formatSize(done)} / ${formatSize(totalSize)}`,
-          });
+      const decrypted = await bundle.decryptFiles(
+        // Everything, unless some files were decrypted one by one before.
+        missing.length === bundle.files.length ? undefined : missing.map((file) => file.index),
+        {
+          maxCoalescedPlaintextBytes: DOWNLOAD_ALL_BUNDLE_COALESCED_PLAINTEXT_BYTES,
+          onProgress: ({ decryptedBytes }) =>
+            setProgress(downloadProgress(decryptedBytes, totalBytes)),
         },
-      });
-      setDownloadedFiles(files);
-      await saveDecrypted(files);
+      );
+      const blobs = new Map(decryptedFiles);
+      for (const { entry, blob } of decrypted) blobs.set(entry.index, blob);
+      setDecryptedFiles(blobs);
+      await saveDecrypted(wanted, blobs);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 403) {
-        toast.error("The download window has expired. Open the link again to restart.");
-      } else {
-        toast.error(err instanceof ApiError ? err.message : "Failed to download files.");
-      }
+      downloadFailed(err, "Failed to download files.");
     } finally {
-      setDownloadingBundle(false);
-      setDownloadProgress(null);
+      setDownloading(null);
+      setProgress(null);
     }
   }
 
-  function saveDecrypted(files: DecryptedEntry[]) {
-    return saveFilesSequentially(files.map(({ entry, blob }) => ({ name: entry.name, blob })));
+  /** Downloads one file and saves it; one already decrypted is saved again from memory. */
+  async function downloadFile(index: number) {
+    if (state.stage !== "bundle-ready") return;
+    const { bundle } = state;
+    const file = bundle.files[index];
+    if (decryptedFiles.has(index)) {
+      await saveDecrypted([file], decryptedFiles);
+      return;
+    }
+
+    setDownloading({ kind: "file", index });
+    setProgress(downloadProgress(0, file.size));
+    try {
+      const blob = await bundle.decryptFile(index, {
+        onProgress: ({ decryptedBytes }) =>
+          setProgress(downloadProgress(decryptedBytes, file.size)),
+      });
+      const blobs = new Map(decryptedFiles).set(index, blob);
+      setDecryptedFiles(blobs);
+      await saveDecrypted([file], blobs);
+    } catch (err) {
+      downloadFailed(err, `Failed to download ${file.name}.`);
+    } finally {
+      setDownloading(null);
+      setProgress(null);
+    }
+  }
+
+  /** Saves these files from memory, one after another, and notes them as saved. */
+  async function saveDecrypted(files: readonly BundleEntry[], blobs: ReadonlyMap<number, Blob>) {
+    await saveFilesSequentially(
+      files.map((file) => ({ name: file.name, blob: blobs.get(file.index)! })),
+    );
+    setSavedFiles((saved) => new Set([...saved, ...files.map((file) => file.index)]));
+  }
+
+  function downloadFailed(err: unknown, message: string) {
+    if (err instanceof ApiError && err.status === 403) {
+      toast.error("The download window has expired. Open the link again to restart.");
+    } else {
+      toast.error(err instanceof ApiError ? err.message : message);
+    }
   }
 
   switch (state.stage) {
@@ -470,12 +526,14 @@ export default function RetrievePage() {
           totalSize={state.bundle.totalSize}
           sessionExpiresAt={state.sessionExpiresAt}
           burnAfterRead={state.burnAfterRead}
-          downloading={downloadingBundle}
-          progress={downloadProgress}
-          downloadedFiles={downloadedFiles}
+          downloading={downloading}
+          progress={progress}
+          decryptedFiles={decryptedFiles}
+          savedFiles={savedFiles}
           canDelete={Boolean(state.identity.deletionToken) && !state.burnAfterRead}
           deleting={deleting}
           onDownloadAll={downloadAll}
+          onDownloadFile={downloadFile}
           onDelete={() => handleDelete(state.identity)}
         />
       );

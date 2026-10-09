@@ -22,6 +22,14 @@ vi.mock("../../lib/api", async (importOriginal) => {
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
+// jsdom can't hand a file to a download; what the page saves is recorded instead.
+const download = vi.hoisted(() => ({
+  saveBlob: vi.fn(),
+  saveFilesSequentially: vi.fn(async (_files: Array<{ name: string; blob: Blob }>) => {}),
+}));
+
+vi.mock("../../lib/download", () => download);
+
 const SECRET_TEXT = "the launch code is 0000";
 
 // The page derives the password key with scrypt on the main thread, which is
@@ -125,6 +133,7 @@ describe("RetrievePage", () => {
   beforeEach(() => {
     for (const fn of Object.values(api)) fn.mockReset();
     vi.mocked(toast.error).mockClear();
+    download.saveFilesSequentially.mockClear();
   });
 
   it.each([3, 2] as const)("reveals a text secret (bundle version %i)", async (version) => {
@@ -520,9 +529,28 @@ describe("RetrievePage", () => {
   describe("files", () => {
     const FILES = { "alpha.txt": "first file", "bravo.txt": "second file", "charlie.txt": "third" };
 
+    /** Whether leaving the page now would ask first. */
+    function leavingAsks(): boolean {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    }
+
     async function showFiles() {
       fireEvent.click(await screen.findByRole("button", { name: "Show the files" }));
       await screen.findByRole("heading", { name: /^Here( are your files|'s your file)$/ });
+    }
+
+    /** The names and contents of what the page handed to the browser in its last save. */
+    async function lastSaved(): Promise<[string, string][]> {
+      const [files] = download.saveFilesSequentially.mock.calls.at(-1) ?? [[]];
+      return Promise.all(files.map(async (file) => [file.name, await file.blob.text()]));
+    }
+
+    async function clickAndWaitForSave(name: string) {
+      const saves = download.saveFilesSequentially.mock.calls.length;
+      fireEvent.click(screen.getByRole("button", { name }));
+      await waitFor(() => expect(download.saveFilesSequentially.mock.calls.length).toBe(saves + 1));
     }
 
     it.each([3, 2] as const)("lists the files by name (bundle version %i)", async (version) => {
@@ -534,6 +562,160 @@ describe("RetrievePage", () => {
       for (const [index, name] of Object.keys(FILES).entries()) {
         expect(screen.getByTestId(`bundle-file-${index}`).textContent).toContain(name);
       }
+    });
+
+    it.each([3, 2] as const)(
+      "downloads a single file out of several (bundle version %i)",
+      async (version) => {
+        await publishFiles(FILES, { version });
+        render(<RetrievePage />);
+        await showFiles();
+
+        await clickAndWaitForSave("Download bravo.txt");
+
+        expect(await lastSaved()).toEqual([["bravo.txt", "second file"]]);
+        // The others stay listed, and can still be downloaded.
+        expect(await screen.findByRole("button", { name: "Save bravo.txt again" })).toBeTruthy();
+        for (const name of ["Download alpha.txt", "Download charlie.txt"]) {
+          expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(false);
+        }
+        expect(screen.getByRole("button", { name: "Download the rest" })).toBeTruthy();
+      },
+    );
+
+    it("fetches only the chunks of the file it downloads", async () => {
+      const MIB = 1024 * 1024;
+      const big = (fill: string) => fill.repeat(MIB);
+      await publishFiles({ "a.bin": big("a"), "b.bin": big("b"), "c.bin": big("c") });
+      render(<RetrievePage />);
+      await showFiles();
+      const opened = api.retrieveSecretRange.mock.calls.length;
+
+      await clickAndWaitForSave("Download c.bin");
+
+      expect(await lastSaved()).toEqual([["c.bin", big("c")]]);
+      // c.bin begins after the 2 MiB of the other two: nothing before it is read.
+      const reads = api.retrieveSecretRange.mock.calls.slice(opened);
+      expect(reads.length).toBeGreaterThan(0);
+      for (const [, , start] of reads) expect(start).toBeGreaterThan(2 * MIB);
+    });
+
+    it("downloads all files, then saves them again from memory", async () => {
+      await publishFiles(FILES);
+      render(<RetrievePage />);
+      await showFiles();
+
+      await clickAndWaitForSave("Download files");
+      expect(await lastSaved()).toEqual([
+        ["alpha.txt", "first file"],
+        ["bravo.txt", "second file"],
+        ["charlie.txt", "third"],
+      ]);
+      const reads = api.retrieveSecretRange.mock.calls.length;
+
+      await clickAndWaitForSave("Save again");
+      expect((await lastSaved()).map(([name]) => name)).toEqual([
+        "alpha.txt",
+        "bravo.txt",
+        "charlie.txt",
+      ]);
+      await clickAndWaitForSave("Save alpha.txt again");
+      expect(await lastSaved()).toEqual([["alpha.txt", "first file"]]);
+      expect(api.retrieveSecretRange).toHaveBeenCalledTimes(reads);
+    });
+
+    it("downloads the rest without saving a file twice", async () => {
+      await publishFiles(FILES);
+      render(<RetrievePage />);
+      await showFiles();
+
+      await clickAndWaitForSave("Download alpha.txt");
+      await clickAndWaitForSave("Download the rest");
+
+      expect(await lastSaved()).toEqual([
+        ["bravo.txt", "second file"],
+        ["charlie.txt", "third"],
+      ]);
+      expect(await screen.findByRole("button", { name: "Save again" })).toBeTruthy();
+      expect(
+        screen.getByText(
+          "Saved. If your browser blocked one of them, use the button next to that file.",
+        ),
+      ).toBeTruthy();
+    });
+
+    it("gives a bundle of one file a single download button", async () => {
+      await publishFiles({ "only.txt": "the only file" });
+      render(<RetrievePage />);
+      await showFiles();
+
+      expect(screen.queryByRole("button", { name: "Download only.txt" })).toBeNull();
+      await clickAndWaitForSave("Download file");
+
+      expect(await lastSaved()).toEqual([["only.txt", "the only file"]]);
+      expect(await screen.findByRole("button", { name: "Save again" })).toBeTruthy();
+    });
+
+    it("asks before leaving a one-time share until every file is saved", async () => {
+      await publishFiles(FILES, { burnAfterRead: true });
+      render(<RetrievePage />);
+      await showFiles();
+
+      expect(
+        screen.getByText(
+          /^One-time: files you don't save in the next \d+:\d\d are gone for good\.$/,
+        ),
+      ).toBeTruthy();
+      expect(leavingAsks()).toBe(true);
+
+      await clickAndWaitForSave("Download charlie.txt");
+      expect(leavingAsks()).toBe(true);
+      await clickAndWaitForSave("Download alpha.txt");
+      expect(leavingAsks()).toBe(true);
+
+      await clickAndWaitForSave("Download bravo.txt");
+      await waitFor(() => expect(leavingAsks()).toBe(false));
+      expect(screen.getByRole("button", { name: "Save again" })).toBeTruthy();
+    });
+
+    it("asks before leaving a one-time share until Download files has saved them all", async () => {
+      await publishFiles(FILES, { burnAfterRead: true });
+      render(<RetrievePage />);
+      await showFiles();
+      expect(leavingAsks()).toBe(true);
+
+      await clickAndWaitForSave("Download files");
+
+      await waitFor(() => expect(leavingAsks()).toBe(false));
+    });
+
+    it("doesn't ask before leaving a reusable share", async () => {
+      await publishFiles(FILES);
+      render(<RetrievePage />);
+      await showFiles();
+
+      expect(screen.getByText(/^\d+:\d\d left to download\.$/)).toBeTruthy();
+      expect(leavingAsks()).toBe(false);
+    });
+
+    it("stops asking once the window closed with nothing left to save", async () => {
+      await publishFiles(FILES, {
+        burnAfterRead: true,
+        sessionExpiresAt: new Date(Date.now() - 1000).toISOString(),
+      });
+      render(<RetrievePage />);
+      await showFiles();
+
+      expect(
+        screen.getByText("The download window closed. This one-time secret can't be opened again."),
+      ).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Download files" }).hasAttribute("disabled")).toBe(
+        true,
+      );
+      expect(
+        screen.getByRole("button", { name: "Download alpha.txt" }).hasAttribute("disabled"),
+      ).toBe(true);
+      expect(leavingAsks()).toBe(false);
     });
   });
 });
