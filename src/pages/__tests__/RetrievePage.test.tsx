@@ -1,9 +1,4 @@
-import {
-  createEncryptedBundle,
-  createStreamBundle,
-  KeySet,
-  type SecretMeta,
-} from "@secretli/format";
+import { createStreamBundle, KeySet, type SecretMeta } from "@secretli/format";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { ApiError, type RetrievalSessionResponse } from "../../lib/api";
@@ -44,8 +39,6 @@ interface ShareOptions {
   opened?: boolean;
   /** What the metadata says the secret is, for a kind this version doesn't know. */
   type?: string;
-  /** The bundle version to write; 3 unless set. */
-  version?: 2 | 3;
   /** When the retrieval session ends; in 15 minutes unless set. */
   sessionExpiresAt?: string;
 }
@@ -76,10 +69,7 @@ async function publishShare(files: File[], options: ShareOptions) {
   const blobKeySet = options.password
     ? await KeySet.fromShareSecret(shareSecret, options.password)
     : baseKeySet;
-  const { blob } =
-    options.version === 2
-      ? await createEncryptedBundle(files, blobKeySet)
-      : await createStreamBundle(files, blobKeySet);
+  const { blob } = await createStreamBundle(files, blobKeySet);
   const bytes = new Uint8Array(await blob.arrayBuffer());
 
   api.getSecretMetadata.mockResolvedValue({
@@ -136,8 +126,8 @@ describe("RetrievePage", () => {
     download.saveFilesSequentially.mockClear();
   });
 
-  it.each([3, 2] as const)("reveals a text secret (bundle version %i)", async (version) => {
-    await publishTextShare({ version });
+  it("reveals a text secret", async () => {
+    await publishTextShare();
     render(<RetrievePage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Reveal secret" }));
@@ -492,8 +482,8 @@ describe("RetrievePage", () => {
       await waitFor(() => expect(download.saveFilesSequentially.mock.calls.length).toBe(saves + 1));
     }
 
-    it.each([3, 2] as const)("lists the files by name (bundle version %i)", async (version) => {
-      await publishFiles(FILES, { version });
+    it("lists the files by name", async () => {
+      await publishFiles(FILES);
       render(<RetrievePage />);
       await showFiles();
 
@@ -503,24 +493,21 @@ describe("RetrievePage", () => {
       }
     });
 
-    it.each([3, 2] as const)(
-      "downloads a single file out of several (bundle version %i)",
-      async (version) => {
-        await publishFiles(FILES, { version });
-        render(<RetrievePage />);
-        await showFiles();
+    it("downloads a single file out of several", async () => {
+      await publishFiles(FILES);
+      render(<RetrievePage />);
+      await showFiles();
 
-        await clickAndWaitForSave("Download bravo.txt");
+      await clickAndWaitForSave("Download bravo.txt");
 
-        expect(await lastSaved()).toEqual([["bravo.txt", "second file"]]);
-        // The others stay listed, and can still be downloaded.
-        expect(await screen.findByRole("button", { name: "Save bravo.txt again" })).toBeTruthy();
-        for (const name of ["Download alpha.txt", "Download charlie.txt"]) {
-          expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(false);
-        }
-        expect(screen.getByRole("button", { name: "Download the rest" })).toBeTruthy();
-      },
-    );
+      expect(await lastSaved()).toEqual([["bravo.txt", "second file"]]);
+      // The others stay listed, and can still be downloaded.
+      expect(await screen.findByRole("button", { name: "Save bravo.txt again" })).toBeTruthy();
+      for (const name of ["Download alpha.txt", "Download charlie.txt"]) {
+        expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(false);
+      }
+      expect(screen.getByRole("button", { name: "Download the rest" })).toBeTruthy();
+    });
 
     it("fetches only the chunks of the file it downloads", async () => {
       const MIB = 1024 * 1024;
