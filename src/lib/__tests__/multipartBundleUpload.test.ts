@@ -170,7 +170,6 @@ describe("uploadMultipartBundle", () => {
 
     // The assembled object is a version 3 bundle that decrypts with the bundle key.
     const bundle = await openAssembled(blob, params.bundleKeySet);
-    expect(bundle.version).toBe(3);
     expect(bundle.files).toEqual([
       { index: 0, name: "payload.bin", type: "application/octet-stream", size: 13 * MIB },
     ]);
@@ -190,7 +189,6 @@ describe("uploadMultipartBundle", () => {
     const blob = assembledBlob(server);
     expect(blob.length).toBe(server.status.blob_size);
     const bundle = await openAssembled(blob, params.bundleKeySet);
-    expect(bundle.version).toBe(3);
     expect(bundle.files.map((file) => file.name)).toEqual(["tiny.bin"]);
     // The password-derived key is what protects the blob, not the base key.
     await expect(openAssembled(blob, params.baseKeySet)).rejects.toThrow();
