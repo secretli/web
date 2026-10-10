@@ -12,7 +12,7 @@ Once a link is ready, **Send with a code** shows a code like `7-acid-rocket`. On
 - **Limits.** A code works once and for ten minutes. A wrong code ends the transfer on both sides, so someone guessing gets one try in about 1.7 million. Only the link to hand out is sent; the owner link stays on the device that made the secret.
 - **Typing.** Case, spaces or dots instead of dashes, and the first three letters of a word are all accepted. Codes are checked on the device before anything is sent, so a typo doesn't use up the transfer.
 
-The protocol, the word list (the [EFF short word list](https://www.eff.org/dice), CC BY 3.0 US) and their tests come from `@secretli/format`, specified in [FORMAT.md section 11](https://github.com/secretli/format/blob/main/FORMAT.md#11-handing-a-link-over-with-a-code). Here, `src/lib/transferSession.ts` talks to the relay, and the key exchange and the word list load only when someone sends or receives with a code, so they stay out of the main bundle.
+The protocol, the word list (the [EFF short word list](https://www.eff.org/dice), CC BY 3.0 US) and their tests come from `@secretli/format`, specified in [FORMAT.md section 11](https://github.com/secretli/format/blob/main/spec/FORMAT.md#11-handing-a-link-over-with-a-code). Here, `src/lib/transferSession.ts` talks to the relay, and the key exchange and the word list load only when someone sends or receives with a code, so they stay out of the main bundle.
 
 ## Development
 
