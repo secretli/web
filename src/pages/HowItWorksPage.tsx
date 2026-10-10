@@ -4,7 +4,7 @@ import { FOCUS } from "../components/ui/styles";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 const SOURCE = "https://github.com/secretli";
-const FORMAT = "https://github.com/secretli/format/blob/main/FORMAT.md";
+const FORMAT = "https://github.com/secretli/format/blob/main/spec/FORMAT.md";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
