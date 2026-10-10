@@ -173,8 +173,8 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
       '@secretli/format':
-        specifier: https://github.com/secretli/format/releases/download/v0.5.0/secretli-format-0.5.0.tgz
-        version: https://github.com/secretli/format/releases/download/v0.5.0/secretli-format-0.5.0.tgz
+        specifier: https://github.com/secretli/format/releases/download/v0.6.0/secretli-format-0.6.0.tgz
+        version: https://github.com/secretli/format/releases/download/v0.6.0/secretli-format-0.6.0.tgz
       jsqr:
         specifier: ^1.4.0
         version: 1.4.0
@@ -703,9 +703,9 @@ packages:
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
 
-  '@secretli/format@https://github.com/secretli/format/releases/download/v0.5.0/secretli-format-0.5.0.tgz':
-    resolution: {integrity: sha512-BerZeOAqbTqrspmVMgtmiaLDMF3dDc2UKMYntFrvIuNazEebtE6rxmIk7qWWTMvLTcekHWScgWwA7L9MWVhLYQ==, tarball: https://github.com/secretli/format/releases/download/v0.5.0/secretli-format-0.5.0.tgz}
-    version: 0.5.0
+  '@secretli/format@https://github.com/secretli/format/releases/download/v0.6.0/secretli-format-0.6.0.tgz':
+    resolution: {integrity: sha512-64VfQWj/D+/XQ+1AS/UM/hTXcMIBzpMO26cR+RMtXWzcbQ6vClp4fiL20P3OZ4S49MgS/m9w/qr8NQcLeoHzRg==, tarball: https://github.com/secretli/format/releases/download/v0.6.0/secretli-format-0.6.0.tgz}
+    version: 0.6.0
     engines: {node: '>=20'}
 
   '@tailwindcss/node@4.3.3':
@@ -1959,7 +1959,7 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
-  '@secretli/format@https://github.com/secretli/format/releases/download/v0.5.0/secretli-format-0.5.0.tgz':
+  '@secretli/format@https://github.com/secretli/format/releases/download/v0.6.0/secretli-format-0.6.0.tgz':
     dependencies:
       '@noble/ciphers': 2.4.0
       '@noble/curves': 2.4.0
