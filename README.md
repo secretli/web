@@ -16,7 +16,7 @@ The protocol, the word list (the [EFF short word list](https://www.eff.org/dice)
 
 ## Development
 
-Prerequisites: Node 24 and pnpm 12, the version `packageManager` in package.json pins (`corepack enable pnpm` provides it). The dev server needs an API to talk to; start one from a checkout of secretli/server (`docker compose -f docker/docker-compose.yml --profile app up -d` there), or run the whole stack described below.
+Prerequisites: Node 24 and pnpm 12, the version `packageManager` in package.json pins (`corepack enable pnpm` provides it). pnpm's settings are in `pnpm-workspace.yaml`: which dependencies may run install scripts, and exceptions to pnpm's refusal of versions less than a day old. The dev server needs an API to talk to; start one from a checkout of secretli/server (`docker compose -f docker/docker-compose.yml --profile app up -d` there), or run the whole stack described below.
 
 ```bash
 pnpm install
@@ -76,7 +76,7 @@ cosign verify ghcr.io/secretli/web:main \
 
 ## The format library
 
-`@secretli/format` is a dependency on a release archive of secretli/format, pinned by URL in `package.json` and by hash in the lockfile. Dependabot cannot follow such a dependency, so a new format release is adopted by hand:
+`@secretli/format` is a dependency on a release archive of secretli/format, pinned by URL in `package.json` and by its integrity hash in the lockfile. Renovate, which keeps the other dependencies up to date, cannot follow such a dependency, so a new format release is adopted by hand:
 
 ```bash
 pnpm add https://github.com/secretli/format/releases/download/v0.5.0/secretli-format-0.5.0.tgz
