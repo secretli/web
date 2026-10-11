@@ -13,8 +13,9 @@ header() { headers "$1" | tr -d '\r' | grep -i "^$2:" | head -1 | cut -d' ' -f2-
 status() { curl -s -o /dev/null -w '%{http_code}' "$BASE$1"; }
 
 csp="$(header / content-security-policy)"
-[ "$csp" = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:" ] ||
+[ "$csp" = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" ] ||
   fail "content security policy on /: $csp"
+[ "$(header / cross-origin-opener-policy)" = same-origin ] || fail "opener policy on /"
 [ "$(header / x-frame-options)" = DENY ] || fail "frame options on /"
 [ "$(header / x-content-type-options)" = nosniff ] || fail "nosniff on /"
 [ "$(header / referrer-policy)" = no-referrer ] || fail "referrer policy on /"

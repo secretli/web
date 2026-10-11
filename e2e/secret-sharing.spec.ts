@@ -7,6 +7,38 @@ async function shownLink(page: Page, which: "share-link" | "owner-link"): Promis
   return (await page.getByTestId(which).textContent()) ?? "";
 }
 
+test.describe("Content security policy", () => {
+  test("sharing and opening a secret break none of its rules", async ({ page }) => {
+    // Recorded in the page before any of its own scripts run.
+    await page.addInitScript(() => {
+      const seen: string[] = [];
+      (window as unknown as { cspViolations: string[] }).cspViolations = seen;
+      document.addEventListener("securitypolicyviolation", (event) =>
+        seen.push(`${event.effectiveDirective} ${event.blockedURI}`),
+      );
+    });
+    const violations = () =>
+      page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations);
+
+    await page.goto("/share");
+    await page.fill("#secret-text", `CSP check ${Date.now()}`);
+    await page.click('button[type="submit"]');
+    await expect(page.getByRole("heading", { name: "Your link is ready" })).toBeVisible({
+      timeout: 10000,
+    });
+    // A toast too: sonner styles it with a <style> element of its own.
+    await page.getByRole("button", { name: "Copy link" }).click();
+    expect(await violations()).toEqual([]);
+
+    const shareUrl = await shownLink(page, "share-link");
+    await page.goto("/s");
+    await page.goto(shareUrl);
+    await page.getByRole("button", { name: /^Reveal/ }).click();
+    await expect(page.locator("h1")).toHaveText("Here's your secret", { timeout: 10000 });
+    expect(await violations()).toEqual([]);
+  });
+});
+
 test.describe("Text secret sharing", () => {
   test("create secret and retrieve via share link", async ({ page, context }) => {
     const secretText = `Test secret ${Date.now()}`;
