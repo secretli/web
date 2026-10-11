@@ -49,6 +49,11 @@ const DAMAGED = {
   message: "This link is incomplete or damaged. Check that you copied all of it.",
 };
 
+const UNKNOWN_FORMAT = {
+  title: "This link can't be opened here",
+  message: "It uses a format this version of Secretli doesn't understand.",
+};
+
 /** An error page for everything the other titles don't cover. */
 function failed(message: string, owner: boolean): State {
   return { stage: "error", title: "Something went wrong", message, owner };
@@ -159,7 +164,19 @@ export default function RetrievePage() {
       const baseKeySet = await KeySet.fromShareSecret(shareSecret);
       const encoded = baseKeySet.getEncoded();
       const serverMeta = await getSecretMetadata(encoded.publicID, encoded.metadataToken);
-      const clientMeta = await baseKeySet.decryptMeta(serverMeta.encrypted_meta);
+      let clientMeta: SecretMeta;
+      try {
+        clientMeta = await baseKeySet.decryptMeta(serverMeta.encrypted_meta);
+      } catch (err) {
+        // The library opens only metadata of the shape this version knows
+        // (FORMAT.md section 4); a kind of secret from a later version is
+        // refused here, before anything is used up.
+        if (err instanceof Error && err.message.startsWith("invalid metadata envelope")) {
+          setState({ stage: "error", ...UNKNOWN_FORMAT, owner });
+          return;
+        }
+        throw err;
+      }
 
       setState({
         stage: "confirm",
@@ -223,16 +240,6 @@ export default function RetrievePage() {
   }
 
   async function reveal(identity: ShareIdentity, blobKeySet: KeySet, clientMeta: SecretMeta) {
-    if (clientMeta.type !== "text" && clientMeta.type !== "bundle") {
-      setState({
-        stage: "error",
-        title: "This link can't be opened here",
-        message: "It uses a format this version of Secretli doesn't understand.",
-        owner: Boolean(identity.deletionToken),
-      });
-      return;
-    }
-
     // The public ID always comes from the share secret; blob access may be
     // password-derived.
     const publicID = identity.baseKeySet.getEncoded().publicID;
