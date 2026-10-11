@@ -36,6 +36,13 @@ function useSecondsUntil(iso: string): number {
   return seconds;
 }
 
+/**
+ * How many files the list shows at first, and adds each time more are asked
+ * for. A bundle may list tens of thousands; as rows all at once they would
+ * freeze the tab, with a one-time secret already used up.
+ */
+export const FILES_SHOWN_AT_ONCE = 200;
+
 function formatCountdown(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
@@ -77,6 +84,8 @@ export default function BundleDownload({
   onDelete,
 }: BundleDownloadProps) {
   const isMulti = files.length > 1;
+  const [shownCount, setShownCount] = useState(FILES_SHOWN_AT_ONCE);
+  const hiddenCount = Math.max(0, files.length - shownCount);
   const secondsLeft = useSecondsUntil(sessionExpiresAt);
   const windowClosed = secondsLeft === 0;
   const someSaved = files.some((file) => savedFiles.has(file.index));
@@ -118,7 +127,7 @@ export default function BundleDownload({
 
       <div className="overflow-hidden rounded-[20px] border border-line bg-surface shadow-card">
         <ul className="m-0 list-none px-2.5 pt-2.5 pb-1.5">
-          {files.map((file) => {
+          {files.slice(0, shownCount).map((file) => {
             const saved = savedFiles.has(file.index);
             return (
               <li
@@ -156,6 +165,21 @@ export default function BundleDownload({
               </li>
             );
           })}
+          {hiddenCount > 0 && (
+            <li className="flex min-h-13 flex-wrap items-center gap-3 pl-3.5 pr-2 text-sm text-muted">
+              <span className="flex-1">
+                … and {hiddenCount.toLocaleString("en-US")} more. Downloading the files saves these
+                too.
+              </span>
+              <button
+                type="button"
+                className={textButtonClass("muted")}
+                onClick={() => setShownCount((count) => count + FILES_SHOWN_AT_ONCE)}
+              >
+                Show {Math.min(hiddenCount, FILES_SHOWN_AT_ONCE)} more
+              </button>
+            </li>
+          )}
         </ul>
         <div className="flex flex-wrap items-center gap-0.5 border-t border-line p-2">
           <Button

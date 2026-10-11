@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import TextResult from "../retrieve/TextResult";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+const download = vi.hoisted(() => ({ saveBlob: vi.fn() }));
+vi.mock("../../lib/download", () => download);
 
 /** Whether leaving the page now would ask first. */
 function leavingAsks(): boolean {
@@ -62,5 +64,31 @@ describe("TextResult", () => {
 
     expect(screen.queryByText(/When you leave this page, it's gone for good/)).toBeNull();
     expect(leavingAsks()).toBe(false);
+  });
+
+  it("offers a text too long to show as a download, and asks before leaving until it was saved", () => {
+    const whole = new Blob(["the beginning", "x".repeat(3 * 1024 * 1024)]);
+    render(
+      <TextResult
+        text="the beginning"
+        whole={whole}
+        burnAfterRead
+        canDelete={false}
+        deleting={false}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/This text is 3\.0 MB, too long to show here/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copy secret" })).toBeNull();
+    expect(leavingAsks()).toBe(true);
+    // What shows is only part of it: copying that doesn't count as keeping it.
+    document.dispatchEvent(new Event("copy"));
+    expect(leavingAsks()).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Download text" }));
+    expect(download.saveBlob).toHaveBeenCalledWith(whole, "secret.txt");
+    expect(leavingAsks()).toBe(false);
+    expect(screen.getByRole("button", { name: "Save again" })).toBeTruthy();
   });
 });

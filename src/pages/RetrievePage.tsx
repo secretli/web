@@ -34,6 +34,7 @@ import { saveFilesSequentially } from "../lib/download";
 import { displayName, downloadName } from "../lib/fileNames";
 import { formatSize } from "../lib/format";
 import { GONE_TITLE, goneMessage } from "../lib/gone";
+import { textToShow } from "../lib/textPreview";
 
 /** The server has no secret for this link and cannot tell why (see goneMessage). */
 function notFound(owner: boolean): { title: string; message: string; owner: boolean } {
@@ -80,7 +81,14 @@ type State =
   | { stage: "prompt" }
   | { stage: "loading" }
   | { stage: "confirm"; identity: ShareIdentity; meta: DecryptedMeta }
-  | { stage: "decrypted"; identity: ShareIdentity; text: string; burnAfterRead: boolean }
+  | {
+      stage: "decrypted";
+      identity: ShareIdentity;
+      text: string;
+      /** The whole text, when it is too long to show all of it. */
+      whole?: Blob;
+      burnAfterRead: boolean;
+    }
   | {
       stage: "bundle-ready";
       identity: ShareIdentity;
@@ -251,7 +259,7 @@ export default function RetrievePage() {
     );
 
     let bundle: OpenedBundle;
-    let text: string | undefined;
+    let textBlob: Blob | undefined;
     try {
       // Text and files share one storage format, so both start the same way.
       // Opening fetches a small bundle whole, and the opened bundle keeps
@@ -263,7 +271,7 @@ export default function RetrievePage() {
         session.blob_size,
       );
       if (clientMeta.type === "text") {
-        text = await (await bundle.decryptFile(0)).text();
+        textBlob = await bundle.decryptFile(0);
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
@@ -273,8 +281,15 @@ export default function RetrievePage() {
       throw err;
     }
 
-    if (text !== undefined) {
-      setState({ stage: "decrypted", identity, text, burnAfterRead: session.burn_after_read });
+    if (textBlob !== undefined) {
+      const { text, complete } = await textToShow(textBlob);
+      setState({
+        stage: "decrypted",
+        identity,
+        text,
+        whole: complete ? undefined : textBlob,
+        burnAfterRead: session.burn_after_read,
+      });
       return;
     }
 
@@ -500,6 +515,7 @@ export default function RetrievePage() {
       return (
         <TextResult
           text={state.text}
+          whole={state.whole}
           burnAfterRead={state.burnAfterRead}
           // Revealing a one-time secret already deleted it from the server.
           canDelete={Boolean(state.identity.deletionToken) && !state.burnAfterRead}
