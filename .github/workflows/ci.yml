@@ -121,7 +121,9 @@ jobs:
   # against this app, behind a gateway like production's. See secretli/e2e.
   whole-setup:
     uses: secretli/e2e/.github/workflows/whole-setup.yml@main
-    secrets: inherit
+    # Only what whole-setup uses, not every secret of this repository.
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     with:
       web_ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
