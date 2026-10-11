@@ -59,8 +59,10 @@ export default function TextResult({
       </PageTitle>
 
       <div className="overflow-hidden rounded-[20px] border border-line bg-surface shadow-card">
+        {/* translate="no": a page translator sends the text to its service. */}
         <pre
           ref={preRef}
+          translate="no"
           className="m-0 min-h-24 overflow-x-auto whitespace-pre-wrap break-words px-6 py-5.5 font-mono text-body leading-[1.7] text-ink"
         >
           {text}

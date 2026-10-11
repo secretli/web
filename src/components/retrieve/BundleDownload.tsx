@@ -1,6 +1,7 @@
 import type { BundleEntry } from "@secretli/format";
 import { useEffect, useState } from "react";
 import { useLeaveWarning } from "../../hooks/useLeaveWarning";
+import { displayName } from "../../lib/fileNames";
 import { formatSize } from "../../lib/format";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
@@ -130,14 +131,18 @@ export default function BundleDownload({
                 </span>
                 <span
                   className="min-w-0 flex-1 truncate font-mono text-sm text-ink"
-                  title={file.name}
+                  title={displayName(file.name)}
                 >
-                  {file.name}
+                  {displayName(file.name)}
                 </span>
                 <span className="text-[13px] tabular-nums text-faint">{formatSize(file.size)}</span>
                 {isMulti && (
                   <IconButton
-                    label={saved ? `Save ${file.name} again` : `Download ${file.name}`}
+                    label={
+                      saved
+                        ? `Save ${displayName(file.name)} again`
+                        : `Download ${displayName(file.name)}`
+                    }
                     disabled={!canGet(file)}
                     onClick={() => onDownloadFile(file.index)}
                   >

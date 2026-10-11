@@ -96,7 +96,8 @@ export default function SecretResult({
 
       <div className="overflow-hidden rounded-[20px] border border-line bg-surface shadow-card">
         <p className="px-6 pt-5.5 pb-4.5 font-mono text-[14.5px] leading-[1.65] break-all text-ink">
-          <code ref={linkRef} data-testid="share-link">
+          {/* translate="no", as everywhere a key shows: a translator would send it away. */}
+          <code ref={linkRef} data-testid="share-link" translate="no">
             {linkBase}
             <span className="text-muted">{linkFragment}</span>
           </code>
@@ -191,6 +192,7 @@ export default function SecretResult({
               <code
                 ref={ownerRef}
                 data-testid="owner-link"
+                translate="no"
                 className="min-w-0 flex-1 basis-65 truncate rounded-xl bg-sunken px-3.5 py-3.25 font-mono text-[13.5px] text-muted ring-1 ring-line ring-inset"
               >
                 {ownerUrl}

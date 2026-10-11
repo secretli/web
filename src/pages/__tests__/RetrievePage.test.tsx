@@ -500,6 +500,18 @@ describe("RetrievePage", () => {
       await waitFor(() => expect(download.saveFilesSequentially.mock.calls.length).toBe(saves + 1));
     }
 
+    it("shows and saves a name without the characters that would disguise it", async () => {
+      // "invoice", a right-to-left override, "txt.exe": shown as is, it reads invoiceexe.txt.
+      const disguised = `invoice${String.fromCodePoint(0x202e)}txt.exe`;
+      await publishFiles({ [disguised]: "not an invoice" });
+      render(<RetrievePage />);
+      await showFiles();
+
+      expect(screen.getByTestId("bundle-file-0").textContent).toContain("invoice?txt.exe");
+      await clickAndWaitForSave("Download file");
+      expect(await lastSaved()).toEqual([["invoice_txt.exe", "not an invoice"]]);
+    });
+
     it("lists the files by name", async () => {
       await publishFiles(FILES);
       render(<RetrievePage />);

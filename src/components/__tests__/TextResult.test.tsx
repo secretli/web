@@ -27,6 +27,13 @@ describe("TextResult", () => {
     Reflect.deleteProperty(navigator, "clipboard");
   });
 
+  it("asks page translators to leave the secret alone", () => {
+    renderText(false);
+    expect(
+      screen.getByText("the launch code is 0000").closest("pre")?.getAttribute("translate"),
+    ).toBe("no");
+  });
+
   it("says a one-time text is the only copy and asks before leaving until it was copied", async () => {
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn(async () => {}) },

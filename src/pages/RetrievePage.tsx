@@ -31,6 +31,7 @@ import {
   startRetrievalSession,
 } from "../lib/api";
 import { saveFilesSequentially } from "../lib/download";
+import { displayName, downloadName } from "../lib/fileNames";
 import { formatSize } from "../lib/format";
 import { GONE_TITLE, goneMessage } from "../lib/gone";
 
@@ -443,7 +444,7 @@ export default function RetrievePage() {
       setDecryptedFiles(blobs);
       await saveDecrypted([file], blobs);
     } catch (err) {
-      downloadFailed(err, `Failed to download ${file.name}.`);
+      downloadFailed(err, `Failed to download ${displayName(file.name)}.`);
     } finally {
       setDownloading(null);
       setProgress(null);
@@ -453,7 +454,7 @@ export default function RetrievePage() {
   /** Saves these files from memory, one after another, and notes them as saved. */
   async function saveDecrypted(files: readonly BundleEntry[], blobs: ReadonlyMap<number, Blob>) {
     await saveFilesSequentially(
-      files.map((file) => ({ name: file.name, blob: blobs.get(file.index)! })),
+      files.map((file) => ({ name: downloadName(file.name), blob: blobs.get(file.index)! })),
     );
     setSavedFiles((saved) => new Set([...saved, ...files.map((file) => file.index)]));
   }
