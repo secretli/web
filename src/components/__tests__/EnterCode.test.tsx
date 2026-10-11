@@ -38,6 +38,22 @@ describe("EnterCode", () => {
     expect(receiveWithCode).toHaveBeenCalledWith("7-aci-roc", expect.any(AbortSignal));
   });
 
+  // The relay draws a nameplate from 1 to 999 at random, so most codes start
+  // with three digits.
+  it("takes a three-digit number, and no more", async () => {
+    receiveWithCode.mockResolvedValue(`${window.location.origin}/s#${SECRET}`);
+    render(<EnterCode onReceived={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.change(numberField(), { target: { value: "7429" } });
+    expect(numberField().value).toBe("742");
+
+    submit("742-aci-roc");
+    expect(numberField().value).toBe("742");
+    await waitFor(() =>
+      expect(receiveWithCode).toHaveBeenCalledWith("742-aci-roc", expect.any(AbortSignal)),
+    );
+  });
+
   it("moves on at a dash, and completes a word from three letters", async () => {
     render(<EnterCode onReceived={vi.fn()} onCancel={vi.fn()} />);
 
