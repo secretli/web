@@ -1,6 +1,12 @@
-/** Hands a decrypted blob to the browser as a file download. */
+/**
+ * Hands a decrypted blob to the browser as a file download. The blob is
+ * typed application/octet-stream whatever the sender said it is: an object
+ * URL lives on this site's origin, and a browser that showed a text/html
+ * file instead of saving it would show it as part of the site.
+ */
 export function saveBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
+  const download = new Blob([blob], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(download);
   const a = document.createElement("a");
   a.href = url;
   a.download = name;
