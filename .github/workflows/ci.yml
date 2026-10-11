@@ -96,6 +96,15 @@ jobs:
       - name: Playwright
         run: pnpm e2e
 
+      # The web container logs no requests: a line would hold the visitor's
+      # address, user agent and the full request. The runs above made plenty.
+      - name: No requests logged
+        run: |
+          if docker logs secretli-e2e-web-1 2>&1 | grep -E '"(GET|HEAD|POST|PUT|DELETE|OPTIONS) /'; then
+            echo "the web container logged requests"
+            exit 1
+          fi
+
       - name: Logs
         if: always()
         env:
