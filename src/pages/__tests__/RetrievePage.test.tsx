@@ -350,9 +350,9 @@ describe("RetrievePage", () => {
       "a kind of secret this version doesn't know",
       "This link can't be opened here",
       async (ownerLink) => {
+        // Said as soon as the link is read: nothing is opened, or used up.
         await publishTextShare({ ownerLink, type: "note" });
         render(<RetrievePage />);
-        await reveal();
       },
     ],
     [

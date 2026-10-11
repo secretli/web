@@ -17,7 +17,8 @@ vi.mock("@secretli/format", async (importOriginal) => ({
   receiveLink: vi.fn(),
 }));
 
-const TRANSFER_ID = "t".repeat(43);
+// 32 bytes as canonical base64url: the last character carries no stray bits.
+const TRANSFER_ID = `${"t".repeat(42)}A`;
 const TOKEN = "k".repeat(43);
 
 function json(status: number, body: unknown): Response {
