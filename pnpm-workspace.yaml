@@ -8,9 +8,3 @@ allowBuilds:
   # binary anyway, through the optional @esbuild/<platform> package, so the
   # script isn't needed; pnpm 10 skipped it too.
   esbuild: false
-
-# pnpm refuses versions published less than a day ago (minimumReleaseAge).
-# @types/node 26.6.5 was locked before that applied here; the entry is moot
-# from 2026-10-10 18:47 UTC on and can go with the next @types/node update.
-minimumReleaseAgeExclude:
-  - "@types/node@26.6.5"
