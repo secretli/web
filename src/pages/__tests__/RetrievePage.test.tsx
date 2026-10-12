@@ -42,6 +42,8 @@ interface ShareOptions {
   type?: string;
   /** When the retrieval session ends; in 15 minutes unless set. */
   sessionExpiresAt?: string;
+  /** How many wrong blob tokens the fake server takes before it deletes the secret; 10 unless set. */
+  wrongTokensLeft?: number;
 }
 
 /** Publishes a text share; see publishShare. */
@@ -84,10 +86,19 @@ async function publishShare(files: File[], options: ShareOptions) {
     created_at: new Date().toISOString(),
     opened: options.opened ?? false,
   });
+  // Like the server: each wrong blob token counts, and the last one deletes
+  // the secret.
+  let wrongTokensLeft = options.wrongTokensLeft ?? 10;
   api.startRetrievalSession.mockImplementation(
     async (_publicID: string, blobToken: string): Promise<RetrievalSessionResponse> => {
+      if (wrongTokensLeft === 0) {
+        throw new ApiError(404, "secret not found");
+      }
       if (blobToken !== blobKeySet.getEncoded().blobToken) {
-        throw new ApiError(403, "invalid blob token");
+        wrongTokensLeft--;
+        throw new ApiError(403, "invalid blob token", undefined, undefined, {
+          attempts_left: wrongTokensLeft,
+        });
       }
       return {
         session_token: "session-token",
@@ -175,7 +186,13 @@ describe("RetrievePage", () => {
     render(<RetrievePage />);
 
     await submitPassword("wrong horse");
-    expect(await screen.findByText("Wrong password. Try again.", {}, AFTER_PASSWORD)).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "Wrong password. 9 tries left before the secret is deleted.",
+        {},
+        AFTER_PASSWORD,
+      ),
+    ).toBeTruthy();
     expect(api.retrieveSecretRange).not.toHaveBeenCalled();
 
     // Selected, so typing again replaces the mistyped password.
@@ -197,11 +214,31 @@ describe("RetrievePage", () => {
         expect(toast.error).toHaveBeenCalledWith("Network error — please check your connection"),
       AFTER_PASSWORD,
     );
-    expect(screen.queryByText("Wrong password. Try again.")).toBeNull();
+    expect(screen.queryByText(/Wrong password/)).toBeNull();
 
     await submitPassword("correct horse");
     expect(await screen.findByText(SECRET_TEXT, {}, AFTER_PASSWORD)).toBeTruthy();
     expect(api.startRetrievalSession).toHaveBeenCalledTimes(1);
+  }, 45_000);
+
+  it("says when the last wrong password deleted the secret", async () => {
+    await publishTextShare({ password: "correct horse", wrongTokensLeft: 2 });
+    render(<RetrievePage />);
+
+    await submitPassword("wrong horse");
+    expect(
+      await screen.findByText(
+        "Wrong password. 1 try left before the secret is deleted.",
+        {},
+        AFTER_PASSWORD,
+      ),
+    ).toBeTruthy();
+
+    await submitPassword("wrong horse again");
+    expect(
+      await screen.findByRole("heading", { name: "The secret was deleted" }, AFTER_PASSWORD),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("Password")).toBeNull();
   }, 45_000);
 
   it("keeps the accepted session when a mistyped password follows it", async () => {

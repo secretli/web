@@ -101,7 +101,24 @@ type State =
   | { stage: "error"; title: string; message: string; owner: boolean };
 
 /** The server did not accept the blob token: the link or password is wrong. */
-class BlobTokenRejectedError extends Error {}
+class BlobTokenRejectedError extends Error {
+  /**
+   * How many more wrong ones the secret takes, when the server said so; at
+   * 0 the server has deleted it.
+   */
+  readonly attemptsLeft?: number;
+
+  constructor(attemptsLeft?: number) {
+    super("The blob token was rejected");
+    this.attemptsLeft = attemptsLeft;
+  }
+}
+
+/** What the password field says after a wrong password. */
+function wrongPassword(attemptsLeft?: number): string {
+  if (attemptsLeft === undefined) return "Wrong password. Try again.";
+  return `Wrong password. ${attemptsLeft} ${attemptsLeft === 1 ? "try" : "tries"} left before the secret is deleted.`;
+}
 
 /** The retrieval session ran out before the share could be read. */
 class RetrievalSessionExpiredError extends Error {
@@ -239,7 +256,17 @@ export default function RetrievePage() {
       // Only a rejected blob token means a wrong password. Once the server
       // accepted it the password was right, whatever fails afterwards.
       if (meta.clientMeta.password_protected && err instanceof BlobTokenRejectedError) {
-        return "Wrong password. Try again.";
+        if (err.attemptsLeft === 0) {
+          setState({
+            stage: "error",
+            title: "The secret was deleted",
+            message:
+              "Too many wrong passwords were tried, so the server deleted it. Ask the sender to share it again.",
+            owner: Boolean(identity.deletionToken),
+          });
+          return null;
+        }
+        return wrongPassword(err.attemptsLeft);
       }
       handleRevealError(err, identity);
       return null;
@@ -326,7 +353,8 @@ export default function RetrievePage() {
       return session;
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
-        throw new BlobTokenRejectedError();
+        const left = err.details?.attempts_left;
+        throw new BlobTokenRejectedError(typeof left === "number" ? left : undefined);
       }
       throw err;
     }
