@@ -182,6 +182,8 @@ describe("RetrievePage", () => {
     const input = screen.getByLabelText("Password") as HTMLInputElement;
     await waitFor(() => expect(document.activeElement).toBe(input));
     expect([input.selectionStart, input.selectionEnd]).toEqual([0, "wrong horse".length]);
+    // Nor does the browser's password manager offer to keep it.
+    expect(input.getAttribute("autocomplete")).toBe("one-time-code");
   }, 30_000);
 
   it("does not blame the password when reading fails after it was accepted", async () => {
