@@ -92,11 +92,11 @@ export default function HowItWorksPage() {
       <Section title="Backups and metrics">
         <p>
           The database is backed up continuously to object storage in another data center, and the
-          backups are kept for a week, 8 days at most. They hold what the database holds, the
-          encrypted metadata, the hashes and the times, but not the content, which is stored apart
-          and not backed up. They also hold rows the server has already forgotten, and every change
-          in them carries its exact time, so for that week the backups can tell when a secret was
-          opened or deleted.
+          backups are kept for a week, the oldest of them a day or two longer. They hold what the
+          database holds, the encrypted metadata, the hashes and the times, but not the content,
+          which is stored apart and not backed up. They also hold rows the server has already
+          forgotten, and every change in them carries its exact time, so for that time the backups
+          can tell when a secret was opened or deleted.
         </p>
         <p>
           The server reports counts to Grafana Cloud so its operation can be watched: requests per
