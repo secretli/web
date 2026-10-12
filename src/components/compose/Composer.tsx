@@ -252,7 +252,9 @@ export default function Composer({ onSubmit, busy, initialText = "" }: ComposerP
                 aria-invalid={passwordError ? true : undefined}
                 aria-describedby={passwordError ? passwordErrorId : undefined}
                 autoFocus
-                autoComplete="new-password"
+                // Like the recipient's field: Chromium doesn't offer to save
+                // a "one-time-code", but does a "new-password".
+                autoComplete="one-time-code"
                 spellCheck={false}
                 disabled={disabled}
                 data-gramm="false"

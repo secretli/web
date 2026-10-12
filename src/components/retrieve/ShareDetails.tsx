@@ -110,7 +110,11 @@ export default function ShareDetails({
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? errorId : undefined}
               autoFocus
-              autoComplete="off"
+              // Not a password to keep: Chromium offers to save one typed
+              // under "off", "current-password" or "new-password", and with
+              // sync it would leave the device. "one-time-code" is the value
+              // it doesn't offer to save.
+              autoComplete="one-time-code"
               spellCheck={false}
               data-gramm="false"
               data-gramm_editor="false"

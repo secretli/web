@@ -117,6 +117,13 @@ describe("Composer", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ password: "s3cret" }));
   });
 
+  it("keeps the password out of the browser's password manager", () => {
+    render(<Composer onSubmit={vi.fn()} busy={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Password" }));
+
+    expect(screen.getByLabelText("Password").getAttribute("autocomplete")).toBe("one-time-code");
+  });
+
   it("forgets the password when the option is turned off again", () => {
     const onSubmit = vi.fn();
     render(<Composer onSubmit={onSubmit} busy={null} />);
