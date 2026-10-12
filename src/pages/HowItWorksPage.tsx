@@ -74,13 +74,35 @@ export default function HowItWorksPage() {
         <p>
           When a one-time secret is opened, when a secret is deleted and when it expires, its link
           gets the same answer from then on as one that never existed, so not even the owner link
-          can tell which of the three happened. Apart from a download still running, nothing is left
-          but the public ID, and only until the secret would have expired: it stays taken so that
-          nobody can put a secret of their own under the same link.
+          can tell which of the three happened. Apart from a download still running and the backups
+          below, nothing is left but the public ID, and only until the secret would have expired: it
+          stays taken so that nobody can put a secret of their own under the same link.
         </p>
         <p>
           That is all. The server cannot read the content, cannot see the file names, and cannot
           tell a note from a file.
+        </p>
+        <p>
+          What it does see is which part of the stream is read. Saving every file reads all of it.
+          Saving only some of several reads only their part, which tells the server roughly where
+          those files lie and how big they are, to about 64 KiB.
+        </p>
+      </Section>
+
+      <Section title="Backups and metrics">
+        <p>
+          The database is backed up continuously to object storage in another data center, and the
+          backups are kept for a week, the oldest of them a day or two longer. They hold what the
+          database holds, the encrypted metadata, the hashes and the times, but not the content,
+          which is stored apart and not backed up. They also hold rows the server has already
+          forgotten, and every change in them carries its exact time, so for that time the backups
+          can tell when a secret was opened or deleted.
+        </p>
+        <p>
+          The server reports counts to Grafana Cloud so its operation can be watched: requests per
+          route and status and how long they took, how many secrets were made, how many are live and
+          how many bytes they take up. These are totals, sampled every minute, without IDs or
+          addresses.
         </p>
       </Section>
 
@@ -91,17 +113,26 @@ export default function HowItWorksPage() {
           stays open for 15 minutes so the transfer can finish; then the data is gone.
         </p>
         <p>
-          Everything expires, from 5 minutes to 7 days after you made it. A cleanup runs every
-          minute and removes what has run out.
+          Everything expires, from 5 minutes to 7 days after you made it: never sooner than you
+          chose, and gone within about two minutes after. Times are kept to the minute, rounded up,
+          and a cleanup runs every minute and removes what has run out. A download already under way
+          at that moment may finish its last request.
         </p>
       </Section>
 
       <Section title="Passwords">
         <p>
           With a password, the key for the content is derived from the secret and the password
-          together, using scrypt, in your browser. The password never leaves it either. The server
-          cannot check a password: a wrong one simply fails to unlock, and trying does not use up a
-          one-time secret.
+          together, using scrypt, in your browser, and so is the token the server asks for before it
+          hands the content out. The password never leaves your browser. The server cannot tell a
+          wrong password from a broken link, but it counts them: a secret takes 10 wrong passwords
+          and is deleted at the tenth. Until then, trying does not use up a one-time secret.
+        </p>
+        <p>
+          A password protects against someone who gets hold of the link, and only as well as it is
+          strong. Ten tries are enough to guess a weak one, and someone who had the link and the
+          server's stored data as well could try passwords without limit. Choose a long or random
+          one, and send it another way than the link.
         </p>
       </Section>
 
