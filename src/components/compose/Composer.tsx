@@ -42,17 +42,7 @@ interface ComposerProps {
   initialText?: string;
 }
 
-const EXPIRATIONS = [
-  ["5m", "5 min"],
-  ["10m", "10 min"],
-  ["15m", "15 min"],
-  ["1h", "1 hour"],
-  ["4h", "4 hours"],
-  ["12h", "12 hours"],
-  ["1d", "1 day"],
-  ["3d", "3 days"],
-  ["7d", "7 days"],
-] as const;
+const EXPIRATIONS = ["5m", "10m", "15m", "1h", "4h", "12h", "1d", "3d", "7d"] as const;
 
 const OPENS = [
   { once: true, label: "Once", detail: "The first visit shows it, then it is deleted." },
@@ -98,7 +88,6 @@ export default function Composer({ onSubmit, busy, initialText = "" }: ComposerP
 
   const disabled = busy !== null;
   const hasContent = files.length > 0 || text.trim().length > 0;
-  const expirationLabel = EXPIRATIONS.find(([value]) => value === expiration)?.[1] ?? expiration;
 
   const addFiles = useCallback(
     (added: File[]) => {
@@ -306,8 +295,8 @@ export default function Composer({ onSubmit, busy, initialText = "" }: ComposerP
               name={`Expires in ${formatExpiration(expiration)}`}
               label={
                 <>
-                  <span className="max-sm:hidden">Expires in</span>
-                  <span className="text-ink">{expirationLabel}</span>
+                  <span className="max-sm:hidden">Expires in</span>{" "}
+                  <span className="text-ink">{formatExpiration(expiration)}</span>
                 </>
               }
               open={menu === "expires"}
@@ -320,12 +309,11 @@ export default function Composer({ onSubmit, busy, initialText = "" }: ComposerP
                   Expires after
                 </legend>
                 <div className="grid grid-cols-3 gap-1">
-                  {EXPIRATIONS.map(([value, label]) => (
+                  {EXPIRATIONS.map((value) => (
                     <button
                       key={value}
                       type="button"
                       aria-pressed={value === expiration}
-                      aria-label={formatExpiration(value)}
                       onClick={() => {
                         setExpiration(value);
                         setMenu(null);
@@ -334,7 +322,7 @@ export default function Composer({ onSubmit, busy, initialText = "" }: ComposerP
                         value === expiration ? `font-semibold ${SELECTED}` : "text-muted"
                       }`}
                     >
-                      {label}
+                      {formatExpiration(value)}
                     </button>
                   ))}
                 </div>
@@ -345,7 +333,7 @@ export default function Composer({ onSubmit, busy, initialText = "" }: ComposerP
               name={once ? "Opens once" : "Opens until it expires"}
               label={
                 <>
-                  <span>Opens</span>
+                  <span>Opens</span>{" "}
                   <span className="text-ink">{once ? "once" : "until it expires"}</span>
                 </>
               }
