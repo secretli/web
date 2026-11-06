@@ -1,11 +1,12 @@
 # The build stage runs on the native builder platform: its output is static
 # files, the same for every target.
-FROM --platform=$BUILDPLATFORM node:24-alpine AS build
+FROM --platform=$BUILDPLATFORM node:26-alpine AS build
 # The commit the image is built from, shown in the app's footer.
 ARG VERSION=dev
-RUN corepack enable pnpm
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# Node 26 ships no corepack: install the pnpm version packageManager pins.
+RUN npm install -g "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1]")"
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN VITE_BUILD_VERSION=$VERSION pnpm build
