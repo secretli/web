@@ -9,7 +9,6 @@ import {
   retryDelayMs,
   type StartUploadSessionResponse,
   startUploadSession,
-  type UploadSessionPart,
   uploadSessionPart,
 } from "./api";
 
@@ -36,11 +35,26 @@ export interface MultipartBundleUploadParams {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * Where an upload stands, in bytes of the encrypted bundle. They always nest:
+ * uploadedBytes <= sentBytes <= encryptedBytes <= totalBytes.
+ */
 export interface MultipartUploadProgress {
-  readonly uploadedBytes: number;
+  /** The whole encrypted bundle, padding included. */
   readonly totalBytes: number;
+  /** Read and encrypted so far: what is still to read is totalBytes minus this. */
+  readonly encryptedBytes: number;
+  /** Handed to the network so far, parts still on their way included. */
+  readonly sentBytes: number;
+  /** Confirmed by the server: parts it has stored. */
+  readonly uploadedBytes: number;
   readonly uploadedParts: number;
+  /** A part failed for a moment and is being sent again. */
+  readonly retrying: boolean;
 }
+
+/** How often progress is reported at most while bytes trickle in, in ms. */
+const PROGRESS_INTERVAL_MS = 100;
 
 export interface MultipartBundleUploadResult {
   readonly expires_at: string;
@@ -113,21 +127,45 @@ async function encryptAndQueueParts(
   session: StartUploadSessionResponse,
   uploader: UploadQueue,
 ) {
+  let encryptedBytes = 0;
   let uploadedBytes = 0;
   let uploadedPartCount = 0;
+  // Bytes sent of each part still on its way, and the parts being retried.
+  const sending = new Map<number, number>();
+  const retrying = new Set<number>();
+  let lastReport = 0;
 
-  const reportProgress = () => {
-    params.onProgress?.({
-      uploadedBytes,
+  // Bytes trickle in by the kilobyte; the steps that matter (a part stored,
+  // a retry) report at once, the rest at most every PROGRESS_INTERVAL_MS.
+  const reportProgress = (force: boolean) => {
+    if (!params.onProgress) return;
+    const now = Date.now();
+    if (!force && now - lastReport < PROGRESS_INTERVAL_MS) return;
+    lastReport = now;
+    let inFlight = 0;
+    for (const sent of sending.values()) inFlight += sent;
+    params.onProgress({
       totalBytes: plan.totalSize,
+      encryptedBytes,
+      sentBytes: uploadedBytes + inFlight,
+      uploadedBytes,
       uploadedParts: uploadedPartCount,
+      retrying: retrying.size > 0,
     });
   };
-  reportProgress();
+  reportProgress(true);
+
+  async function* counted(stream: AsyncIterable<Uint8Array>) {
+    for await (const bytes of stream) {
+      encryptedBytes += bytes.length;
+      reportProgress(false);
+      yield bytes;
+    }
+  }
 
   // Every part but the last is exactly part_size, cut wherever chunks begin
   // and end: part n starts at (n - 1) * part_size.
-  const stream = encryptStream(plan, params.files, params.bundleKeySet);
+  const stream = counted(encryptStream(plan, params.files, params.bundleKeySet));
   let partNumber = 1;
   let offset = 0;
   for await (const bytes of cutIntoParts(stream, session.part_size)) {
@@ -145,18 +183,42 @@ async function encryptAndQueueParts(
     throwIfCancelled(params.signal);
     // Waits while the queue is full, so encryption never runs far ahead.
     await uploader.schedule(async (signal) => {
-      const uploaded = await uploadPartWithRetry(
-        session.session_id,
-        session.upload_token,
-        number,
-        partOffset,
-        part,
-        sha256,
-        signal,
-      );
-      uploadedBytes += uploaded.size;
-      uploadedPartCount++;
-      reportProgress();
+      sending.set(number, 0);
+      try {
+        const uploaded = await withTransientRetry(
+          () => {
+            // Retrying covers only the wait: once the part goes out again,
+            // its progress shows that.
+            if (retrying.delete(number)) reportProgress(true);
+            return uploadSessionPart(
+              session.session_id,
+              session.upload_token,
+              number,
+              partOffset,
+              part,
+              sha256,
+              signal,
+              (sent) => {
+                sending.set(number, sent);
+                reportProgress(false);
+              },
+            );
+          },
+          signal,
+          () => {
+            // What the failed attempt sent counts for nothing: it starts over.
+            sending.set(number, 0);
+            retrying.add(number);
+            reportProgress(true);
+          },
+        );
+        uploadedBytes += uploaded.size;
+        uploadedPartCount++;
+      } finally {
+        sending.delete(number);
+        retrying.delete(number);
+      }
+      reportProgress(true);
     });
   }
   if (offset !== plan.totalSize) {
@@ -197,26 +259,16 @@ async function abortQuietly(sessionID: string, uploadToken: string) {
   }
 }
 
-function uploadPartWithRetry(
-  sessionID: string,
-  uploadToken: string,
-  partNumber: number,
-  offset: number,
-  part: Blob,
-  sha256: string,
-  signal: AbortSignal,
-): Promise<UploadSessionPart> {
-  return withTransientRetry(
-    () => uploadSessionPart(sessionID, uploadToken, partNumber, offset, part, sha256, signal),
-    signal,
-  );
-}
-
 /**
  * Retries network failures, rate limiting and server errors, waiting as long
  * as the server asks (capped by retryDelayMs). Client errors are final.
+ * onRetry hears of each failure that will be retried.
  */
-async function withTransientRetry<T>(request: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+async function withTransientRetry<T>(
+  request: () => Promise<T>,
+  signal?: AbortSignal,
+  onRetry?: () => void,
+): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     throwIfCancelled(signal);
     try {
@@ -229,6 +281,7 @@ async function withTransientRetry<T>(request: () => Promise<T>, signal?: AbortSi
       ) {
         throw err;
       }
+      onRetry?.();
       await delay(retryDelayMs(attempt, err.retryAfter), signal);
     }
   }

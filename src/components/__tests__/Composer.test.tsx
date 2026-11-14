@@ -176,12 +176,33 @@ describe("Composer", () => {
     render(
       <Composer
         onSubmit={vi.fn()}
-        busy={{ stage: "uploading", fraction: 0.4, label: "4.0 MB / 10.0 MB", onCancel }}
+        busy={{
+          stage: "uploading",
+          transfer: {
+            totalBytes: 10 * MB,
+            encryptedBytes: 7 * MB,
+            sentBytes: 4 * MB,
+            uploadedBytes: 2 * MB,
+            uploadedParts: 1,
+            retrying: false,
+          },
+          onCancel,
+        }}
       />,
     );
 
-    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("40");
-    expect(screen.getByRole("status").textContent).toContain("4.0 MB / 10.0 MB");
+    // Sent, then encrypted and waiting, then still to read: they add up to the bundle.
+    const bar = screen.getByRole("progressbar");
+    expect(bar.getAttribute("aria-valuenow")).toBe("40");
+    const [sent, encrypted] = Array.from(bar.children) as HTMLElement[];
+    expect(sent.style.width).toBe("40%");
+    expect(encrypted.style.width).toBe("30%");
+    expect(bar.getAttribute("aria-valuetext")).toBe(
+      "40% sent, 3.0 MB ready to send, 3.0 MB still to read",
+    );
+    expect(screen.getByText(/4\.0 MB of 10\.0 MB/)).toBeTruthy();
+    // All is well, so there is nothing to announce.
+    expect(screen.getByRole("status").textContent).toBe("");
     expect(screen.getByRole("button", { name: /Creating link/ }).hasAttribute("disabled")).toBe(
       true,
     );
@@ -190,4 +211,28 @@ describe("Composer", () => {
 
     expect(onCancel).toHaveBeenCalled();
   });
+
+  it("says when a part is being sent again", () => {
+    render(
+      <Composer
+        onSubmit={vi.fn()}
+        busy={{
+          stage: "uploading",
+          transfer: {
+            totalBytes: 10 * MB,
+            encryptedBytes: 10 * MB,
+            sentBytes: 5 * MB,
+            uploadedBytes: 5 * MB,
+            uploadedParts: 1,
+            retrying: true,
+          },
+          onCancel: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("status").textContent).toContain("Trying it again");
+  });
 });
+
+const MB = 1024 * 1024;

@@ -323,8 +323,9 @@ export function uploadSessionPart(
   bytes: Blob,
   sha256: string,
   signal?: AbortSignal,
+  onUploadProgress?: (sentBytes: number) => void,
 ): Promise<UploadSessionPart> {
-  return request(`/api/v1/secrets/uploads/${sessionID}/parts/${partNumber}`, {
+  return sendWithProgress(`/api/v1/secrets/uploads/${sessionID}/parts/${partNumber}`, {
     method: "PUT",
     headers: {
       Authorization: `Bearer ${uploadToken}`,
@@ -335,6 +336,85 @@ export function uploadSessionPart(
     },
     body: bytes,
     signal,
+    onUploadProgress,
+  });
+}
+
+/**
+ * request() over XMLHttpRequest, for bodies whose sending should be visible:
+ * fetch reports nothing until the response arrives (streamed request bodies
+ * would, but only Chromium has them). Fails the way request() does: ApiError
+ * for a bad status or a lost connection, AbortError when cancelled.
+ */
+function sendWithProgress<T>(
+  url: string,
+  options: {
+    method: string;
+    headers: Record<string, string>;
+    body: Blob;
+    signal?: AbortSignal;
+    onUploadProgress?: (sentBytes: number) => void;
+  },
+): Promise<T> {
+  const { requestID, init } = withRequestID({ headers: options.headers });
+  const { signal, onUploadProgress } = options;
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    const onAbort = () => xhr.abort();
+    const settle = () => signal?.removeEventListener("abort", onAbort);
+    const networkError = () =>
+      new ApiError(0, "Network error — please check your connection", requestID);
+
+    xhr.open(options.method, url);
+    new Headers(init.headers).forEach((value, name) => {
+      xhr.setRequestHeader(name, value);
+    });
+    if (onUploadProgress) {
+      xhr.upload.onprogress = (event) => onUploadProgress(event.loaded);
+    }
+    xhr.onerror = () => {
+      settle();
+      reject(networkError());
+    };
+    xhr.onabort = () => {
+      settle();
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+    };
+    xhr.onload = () => {
+      settle();
+      const responseHeaders = new Headers();
+      for (const name of ["Content-Type", "Retry-After", "X-Request-ID"]) {
+        const value = xhr.getResponseHeader(name);
+        if (value !== null) responseHeaders.set(name, value);
+      }
+      if (xhr.status === 0) {
+        reject(networkError());
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const res = new Response(xhr.responseText, {
+          status: xhr.status,
+          headers: responseHeaders,
+        });
+        apiErrorFromResponse(res, requestID).then(reject, reject);
+        return;
+      }
+      if (xhr.status === 204) {
+        resolve(undefined as T);
+        return;
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as T);
+      } catch {
+        reject(networkError());
+      }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    xhr.send(options.body);
   });
 }
 

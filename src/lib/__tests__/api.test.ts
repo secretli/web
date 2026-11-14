@@ -261,6 +261,7 @@ describe("getSecretMetadata", () => {
 describe("upload sessions", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("starts an upload session through the v1 API", async () => {
@@ -303,31 +304,53 @@ describe("upload sessions", () => {
     expect(JSON.parse(call[1]?.body as string)).toEqual(params);
   });
 
-  it("uploads a multipart part with offset, size, and hash headers", async () => {
+  it("uploads a multipart part with offset, size, and hash headers, reporting what it sent", async () => {
     const response = { part_number: 2, offset: 5, size: 3, sha256: "hash", etag: "etag-2" };
     const blob = new Blob(["abc"]);
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
+    const xhr = installFakeXHR({ status: 200, body: JSON.stringify(response) });
+    const sent: number[] = [];
 
     await expect(
-      uploadSessionPart("session-id", "upload-token", 2, 5, blob, "hash"),
+      uploadSessionPart("session-id", "upload-token", 2, 5, blob, "hash", undefined, (n) =>
+        sent.push(n),
+      ),
     ).resolves.toEqual(response);
 
-    const call = fetchSpy.mock.calls[0];
-    expect(call[0]).toBe("/api/v1/secrets/uploads/session-id/parts/2");
-    expect(call[1]).toEqual(
-      expect.objectContaining({
-        method: "PUT",
-        body: blob,
-      }),
-    );
-    expectHeader(call[1], "Authorization", "Bearer upload-token");
-    expectHeader(call[1], "Content-Type", "application/octet-stream");
-    expectHeader(call[1], "X-Part-Offset", "5");
-    expectHeader(call[1], "X-Part-Size", "3");
-    expectHeader(call[1], "X-Part-SHA256", "hash");
-    expectHeader(call[1], "X-Request-ID");
+    const request = xhr.last();
+    expect(request.method).toBe("PUT");
+    expect(request.url).toBe("/api/v1/secrets/uploads/session-id/parts/2");
+    expect(request.body).toBe(blob);
+    expect(request.headers.get("Authorization")).toBe("Bearer upload-token");
+    expect(request.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(request.headers.get("X-Part-Offset")).toBe("5");
+    expect(request.headers.get("X-Part-Size")).toBe("3");
+    expect(request.headers.get("X-Part-SHA256")).toBe("hash");
+    expect(request.headers.get("X-Request-ID")).toBeTruthy();
+    expect(sent).toEqual([3]);
+  });
+
+  it("fails a part upload the way other requests fail", async () => {
+    installFakeXHR({
+      status: 429,
+      body: JSON.stringify({ error: "too many parts" }),
+      headers: { "Retry-After": "5" },
+    });
+    const err = await uploadSessionPart("s", "t", 1, 0, new Blob(["a"]), "h").catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(429);
+    expect(err.retryAfter).toBe("5");
+    expect(err.message).toContain("too many parts");
+
+    installFakeXHR({ networkError: true });
+    const lost = await uploadSessionPart("s", "t", 1, 0, new Blob(["a"]), "h").catch((e) => e);
+    expect(lost).toBeInstanceOf(ApiError);
+    expect(lost.status).toBe(0);
+
+    installFakeXHR({ status: 200, body: "{}", hang: true });
+    const controller = new AbortController();
+    const pending = uploadSessionPart("s", "t", 1, 0, new Blob(["a"]), "h", controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("completes and aborts upload sessions through the v1 API", async () => {
@@ -417,4 +440,60 @@ function expectHeader(init: RequestInit | undefined, name: string, value?: strin
     return;
   }
   expect(headers.get(name)).toBe(value);
+}
+
+interface FakeXHRResponse {
+  status?: number;
+  body?: string;
+  headers?: Record<string, string>;
+  networkError?: boolean;
+  /** Never answers, so only an abort ends it. */
+  hang?: boolean;
+}
+
+/** Stands in for XMLHttpRequest, answering every request with the same response. */
+function installFakeXHR(response: FakeXHRResponse) {
+  const requests: FakeXHR[] = [];
+  class FakeXHR {
+    method = "";
+    url = "";
+    body: unknown;
+    headers = new Headers();
+    status = 0;
+    responseText = "";
+    upload: { onprogress: ((e: { loaded: number }) => void) | null } = { onprogress: null };
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    open(method: string, url: string) {
+      this.method = method;
+      this.url = url;
+    }
+    setRequestHeader(name: string, value: string) {
+      this.headers.set(name, value);
+    }
+    getResponseHeader(name: string) {
+      return response.headers?.[name] ?? null;
+    }
+    abort() {
+      this.onabort?.();
+    }
+    send(body: unknown) {
+      this.body = body;
+      requests.push(this);
+      if (response.hang) return;
+      queueMicrotask(() => {
+        if (response.networkError) {
+          this.onerror?.();
+          return;
+        }
+        this.upload.onprogress?.({ loaded: (body as Blob).size });
+        this.status = response.status ?? 200;
+        this.responseText = response.body ?? "";
+        this.onload?.();
+      });
+    }
+  }
+  vi.stubGlobal("XMLHttpRequest", FakeXHR);
+  return { last: () => requests[requests.length - 1] };
 }

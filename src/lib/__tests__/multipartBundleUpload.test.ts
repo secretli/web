@@ -1,6 +1,10 @@
 import { KeySet, openBundle, plannedBundleSize } from "@secretli/format";
 import { ApiError, type StartUploadSessionResponse, type UploadSessionPart } from "../api";
-import { UploadCancelledError, uploadMultipartBundle } from "../multipartBundleUpload";
+import {
+  type MultipartUploadProgress,
+  UploadCancelledError,
+  uploadMultipartBundle,
+} from "../multipartBundleUpload";
 
 const api = vi.hoisted(() => ({
   startUploadSession: vi.fn(),
@@ -62,7 +66,19 @@ function installFakeServer(): FakeServer {
     return server.status;
   });
   api.uploadSessionPart.mockImplementation(
-    async (_session, _token, partNumber, offset, bytes: Blob, sha256) => {
+    async (
+      _session,
+      _token,
+      partNumber,
+      offset,
+      bytes: Blob,
+      sha256,
+      _signal,
+      onUploadProgress?: (sent: number) => void,
+    ) => {
+      // Half, then all of it, as a network would report it.
+      onUploadProgress?.(Math.floor(bytes.size / 2));
+      onUploadProgress?.(bytes.size);
       const part: UploadSessionPart = {
         part_number: partNumber,
         offset,
@@ -178,6 +194,59 @@ describe("uploadMultipartBundle", () => {
     expect(result.encoded.shareSecret).toBe(params.baseKeySet.getEncoded().shareSecret);
     expect(result.deletionToken).toBe(params.baseKeySet.getEncoded().deletionToken);
   }, 30_000);
+
+  it("reports encrypted, sent and stored bytes that nest and end at the total", async () => {
+    installFakeServer();
+    const params = await baseParams([patternedFile(13 * MIB)]);
+    const progress: MultipartUploadProgress[] = [];
+    // A second passes between any two looks at the clock, so no report is held back.
+    let clock = 0;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => (clock += 1000));
+
+    try {
+      await uploadMultipartBundle({ ...params, onProgress: (p) => progress.push(p) });
+    } finally {
+      now.mockRestore();
+    }
+
+    for (const p of progress) {
+      expect(p.uploadedBytes).toBeLessThanOrEqual(p.sentBytes);
+      expect(p.sentBytes).toBeLessThanOrEqual(p.encryptedBytes);
+      expect(p.encryptedBytes).toBeLessThanOrEqual(p.totalBytes);
+    }
+    // Sending shows before a part is stored: some report has sent bytes not yet confirmed.
+    expect(progress.some((p) => p.sentBytes > p.uploadedBytes)).toBe(true);
+    const last = progress.at(-1);
+    expect(last?.encryptedBytes).toBe(last?.totalBytes);
+    expect(last?.sentBytes).toBe(last?.totalBytes);
+    expect(last?.uploadedBytes).toBe(last?.totalBytes);
+    expect(last?.retrying).toBe(false);
+  }, 30_000);
+
+  it("says a part is being retried, and counts what it sent again from zero", async () => {
+    installFakeServer();
+    const original = api.uploadSessionPart.getMockImplementation();
+    let calls = 0;
+    api.uploadSessionPart.mockImplementation(async (...args) => {
+      calls++;
+      if (calls === 1) {
+        // Some bytes went out before the connection dropped.
+        args[7]?.(40);
+        throw new ApiError(0, "Network error");
+      }
+      return original?.(...args);
+    });
+    const progress: MultipartUploadProgress[] = [];
+
+    await uploadMultipartBundle({
+      ...(await baseParams([patternedFile(64)])),
+      onProgress: (p) => progress.push(p),
+    });
+
+    const retry = progress.find((p) => p.retrying);
+    expect(retry?.sentBytes).toBe(0);
+    expect(progress.at(-1)?.retrying).toBe(false);
+  });
 
   it("uploads a small bundle as a single part", async () => {
     const server = installFakeServer();

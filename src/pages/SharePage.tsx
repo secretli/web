@@ -8,8 +8,8 @@ import PageTitle from "../components/ui/PageTitle";
 import TextButton from "../components/ui/TextButton";
 import { useLeaveWarning } from "../hooks/useLeaveWarning";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { useWakeLock } from "../hooks/useWakeLock";
 import { ApiError, deleteSecret } from "../lib/api";
-import { formatSize } from "../lib/format";
 import { GONE_TITLE, goneMessage } from "../lib/gone";
 import { UploadCancelledError, uploadMultipartBundle } from "../lib/multipartBundleUpload";
 import { takeSharedText } from "../lib/shareTarget";
@@ -56,6 +56,8 @@ export default function SharePage() {
 
   // A navigation away from an in-flight upload silently discards it.
   useLeaveWarning(busy !== null);
+  // A locked screen would send the page to the background and stall the upload.
+  useWakeLock(busy?.onCancel !== undefined);
 
   async function handleSubmit(data: ComposeData) {
     const files =
@@ -100,14 +102,9 @@ export default function SharePage() {
         expiration: data.expiration,
         burnAfterRead: data.burnAfterRead,
         signal: controller.signal,
-        onProgress: ({ uploadedBytes, totalBytes }) => {
+        onProgress: (transfer) => {
           if (!cancellable) return;
-          setBusy({
-            stage: "uploading",
-            fraction: totalBytes > 0 ? uploadedBytes / totalBytes : 0,
-            label: `${formatSize(uploadedBytes)} / ${formatSize(totalBytes)}`,
-            onCancel: () => controller.abort(),
-          });
+          setBusy({ stage: "uploading", transfer, onCancel: () => controller.abort() });
         },
       });
 
