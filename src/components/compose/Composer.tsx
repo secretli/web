@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { formatExpiration } from "../../lib/expiration";
+import type { MultipartUploadProgress } from "../../lib/multipartBundleUpload";
 import { bundleLimitError } from "../../lib/uploadLimits";
 import Spinner from "../Spinner";
 import Button from "../ui/Button";
@@ -18,6 +19,7 @@ import { FOCUS } from "../ui/styles";
 import TextButton from "../ui/TextButton";
 import ChipMenu, { CHIP } from "./ChipMenu";
 import FileList from "./FileList";
+import UploadProgressRow from "./UploadProgressRow";
 
 export type ComposeData = {
   expiration: string;
@@ -29,9 +31,8 @@ export type ComposeData = {
 /** What the page is doing with the last submission, while the composer waits. */
 export interface ComposeProgress {
   stage: "encrypting" | "uploading";
-  /** 0..1, once the upload reports it. */
-  fraction?: number;
-  label?: string;
+  /** How far a file upload is, once it reports it. */
+  transfer?: MultipartUploadProgress;
   onCancel?: () => void;
 }
 
@@ -394,16 +395,21 @@ export default function Composer({ onSubmit, busy, initialText = "" }: ComposerP
           </Button>
         </div>
 
-        {busy && (
-          <ProgressRow
-            label={
-              busy.stage === "encrypting"
-                ? "Encrypting…"
-                : busy.label
-                  ? `Uploading · ${busy.label}`
-                  : "Uploading…"
+        {busy?.transfer && (
+          <UploadProgressRow
+            progress={busy.transfer}
+            action={
+              busy.onCancel && (
+                <TextButton tone="danger" onClick={busy.onCancel}>
+                  Cancel upload
+                </TextButton>
+              )
             }
-            fraction={busy.fraction}
+          />
+        )}
+        {busy && !busy.transfer && (
+          <ProgressRow
+            label={busy.stage === "encrypting" ? "Encrypting…" : "Uploading…"}
             action={
               busy.onCancel && (
                 <TextButton tone="danger" onClick={busy.onCancel}>
