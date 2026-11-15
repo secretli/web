@@ -113,6 +113,17 @@ export default function Layout() {
           >
             Source
           </a>
+          {/* Run by Patrick Scheid; his site holds the legal notice and the privacy policy. */}
+          <a href="https://patrickscheid.de/impressum/" lang="de" className={FOOTER_LINK}>
+            Impressum
+          </a>
+          <a
+            href="https://patrickscheid.de/datenschutz/#secretli"
+            lang="de"
+            className={FOOTER_LINK}
+          >
+            Datenschutz
+          </a>
           <BuildVersion />
         </span>
       </footer>
